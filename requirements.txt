@@ -1,0 +1,10 @@
+# requirements.txt
+django
+django-environ
+mysqlclient
+pandas
+openpyxl
+xlsxwriter
+numpy
+celery
+redis

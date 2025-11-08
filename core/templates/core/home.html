@@ -1,0 +1,121 @@
+{% extends 'base.html' %}
+
+{% block title %}Home - NEPSE Analytics{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-xl-11 mx-auto">
+
+        <div class="p-5 mb-4 bg-white rounded-3 shadow-sm border">
+            <div class="container-fluid py-4">
+                <h1 class="display-5 fw-bold">Welcome to NEPSE Analytics</h1>
+                <p class="col-md-9 fs-4">Your one-stop portal for all NEPSE market data, analysis, and reports. Use the navigation below to get started.</p
+                <a href="#" class="btn btn-primary btn-lg">View Market Summary</a>
+            </div>
+        </div>
+
+        <h2 class="mb-3">Quick Access</h2>
+        <div class="row">
+            
+            <div class="col-lg-4 col-md-6 mb-4">
+                <div class="card h-100 shadow-sm">
+                    <div class="card-body">
+                        <h5 class="card-title text-primary">Today's Price</h5>
+                        <p class="card-text">View daily unadjusted and adjusted stock prices by date or company.</p>
+                        <a href="{% url 'nepse_data:todays_price' %}" class="btn btn-outline-primary">View Prices</a>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-lg-4 col-md-6 mb-4">
+                <div class="card h-100 shadow-sm">
+                    <div class="card-body">
+                        <h5 class="card-title text-success">Indices</h5>
+                        <p class="card-text">Track the historical performance of the NEPSE index and sub-indices.</p>
+                        <a href="#" class="btn btn-outline-success">View Indices</a>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-4 col-md-6 mb-4">
+                <div class="card h-100 shadow-sm">
+                    <div class="card-body">
+                        <h5 class="card-title text-info">Market Capitalization</h5>
+                        <p class="card-text">See the historical total and float market capitalization.</p>
+                        <a href="#" class="btn btn-outline-info">View Market Cap</a>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-4 col-md-6 mb-4">
+                <div class="card h-100 shadow-sm">
+                    <div class="card-body">
+                        <h5 class="card-title text-dark">Listed Companies</h5>
+                        <p class="card-text">Browse, search, and manage all companies listed on the exchange.</p>
+                        <a href="#" class="btn btn-outline-dark">Manage Companies</a>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-4 col-md-6 mb-4">
+                <div class="card h-100 shadow-sm">
+                    <div class="card-body">
+                        <h5 class="card-title text-danger">Statistical Analysis</h5>
+                        <p class="card-text">Run in-depth analysis (Beta, Sharpe) on stocks vs. market indices.</p>
+                        <a href="#" class="btn btn-outline-danger">Go to StatBoard</a>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-4 col-md-6 mb-4">
+                <div class="card h-100 shadow-sm">
+                    <div class="card-body">
+                        <h5 class="card-title text-primary">Live Floorsheet</h5>
+                        <p class="card-text">See real-time trading data as it happens on the exchange floor.</p>
+                        <a href="#" class="btn btn-outline-primary">View Floorsheet</a>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-4 col-md-6 mb-4">
+                <div class="card h-100 shadow-sm">
+                    <div class="card-body">
+                        <h5 class="card-title text-secondary">Price Adjustment Tool</h5>
+                        <p class="card-text">Manage bonus/right share adjustments and recalculate prices.</p>
+                        <a href="#" class="btn btn-outline-secondary">Open Tool</a>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-4 col-md-6 mb-4">
+                <div class="card h-100 shadow-sm">
+                    <div class="card-body">
+                        <h5 class="card-title text-success">Market Summary</h5>
+                        <p class="card-text">A top-level overview of today's market performance.</p>
+                        <a href="#" class="btn btn-outline-success">View Summary</a>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-4 col-md-6 mb-4">
+                <div class="card h-100 shadow-sm border-danger">
+                    <div class="card-body">
+                        <h5 class="card-title text-danger">Admin Panel</h5>
+                        <p class="card-text">Directly access the main Django admin site to manage all data.</p>
+                        <a href="/admin/" class="btn btn-outline-danger" target="_blank">Open Admin</a>
+                    </div>
+                </div>
+            </div>
+
+        </div> <hr class="my-5">
+        <div class="p-5 mb-4 bg-white rounded-3 shadow-sm border text-center">
+            <div class="container-fluid py-3">
+                <h2 class="display-6 fw-bold">Data Entry Portal</h2>
+                <p class="fs-5 text-muted">Manage and input new market data like prices, indices, and more.</p>
+                
+                <a href="#" class="btn btn-warning btn-lg mt-3">
+                            Go to Data Entry Page
+                </a>
+            </div>
+        </div>
+        </div> </div> {% endblock %}
