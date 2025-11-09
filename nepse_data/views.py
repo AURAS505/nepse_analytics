@@ -5,8 +5,14 @@ from django.db.models import Q, Max
 from listed_companies.models import Companies
 from .models import StockPrices
 import datetime
-import csv
 from django.http import HttpResponse
+from django.shortcuts import redirect
+from django.contrib import messages
+from django.views.decorators.http import require_POST
+from adjustments_stock_price.models import StockPricesAdj # Import from other app
+import io
+import csv
+from decimal import Decimal, InvalidOperation
 
 # A helper function to fetch raw SQL as a dictionary
 def dictfetchall(cursor):
@@ -304,3 +310,143 @@ def download_stock_prices_view(request):
             writer.writerow([getattr(row, field) for field in headers])
 
     return response
+
+# --- Helper functions (from your Flask app) ---
+def convert_float(value):
+    if not value or value.strip() in ('', 'N/A', '-'):
+        return None
+    try:
+        return Decimal(value.replace(',', ''))
+    except InvalidOperation:
+        return None
+
+def convert_int(value):
+    if not value or value.strip() in ('', 'N/A', '-'):
+        return None
+    try:
+        return int(value.replace(',', ''))
+    except (ValueError, InvalidOperation):
+        return None
+
+# --- Main View for Data Entry Page ---
+def data_entry_view(request):
+    # This view handles both GET (showing the page) and POST (uploading the file)
+
+    if request.method == 'POST' and request.POST.get('action') == 'upload_price':
+        # --- HANDLE FILE UPLOAD ---
+        price_file = request.FILES.get('price_file')
+
+        if not price_file:
+            messages.error(request, "No file selected for uploading.")
+            return redirect('nepse_data:data_entry')
+
+        if not price_file.name.endswith('.csv'):
+            messages.error(request, "Invalid file type. Please upload a .csv file.")
+            return redirect('nepse_data:data_entry')
+
+        try:
+            csv_file = io.TextIOWrapper(price_file.file, encoding='utf-8')
+            reader = csv.reader(csv_file)
+
+            header = next(reader)
+            expected_columns = len(header)
+            if expected_columns < 19:
+                messages.error(request, f"CSV format error. Expected 19+ columns, found {expected_columns}.")
+                return redirect('nepse_data:data_entry')
+
+            all_rows_raw = list(reader)
+            if not all_rows_raw:
+                messages.error(request, "CSV file is empty or contains only a header.")
+                return redirect('nepse_data:data_entry')
+
+            # Auto-detect date from first row
+            business_date_str = all_rows_raw[0][1].strip()
+
+            # Check for duplicates
+            if StockPrices.objects.filter(business_date=business_date_str).exists():
+                messages.error(request, f"Error: Data for date {business_date_str} (from file) already exists.")
+                return redirect('nepse_data:data_entry')
+
+            # Handle "extra comma in name" logic
+            corrected_rows = []
+            for row in all_rows_raw:
+                if len(row) > expected_columns:
+                    extra_col_count = len(row) - expected_columns
+                    merged_name = ' '.join(row[4 : 4 + extra_col_count + 1])
+                    corrected_row = row[:4] + [merged_name] + row[4 + extra_col_count + 1:]
+                    corrected_rows.append(corrected_row)
+                elif len(row) == expected_columns:
+                    corrected_rows.append(row)
+
+            inserted_rows = 0
+            failed_rows = 0
+
+            for row in corrected_rows:
+                if len(row) < 19:
+                    failed_rows += 1
+                    continue
+
+                try:
+                    StockPrices.objects.create(
+                        business_date=business_date_str,
+                        security_id=row[2].strip(),
+                        symbol=row[3].strip(),
+                        security_name=row[4].strip(),
+                        open_price=convert_float(row[5]),
+                        high_price=convert_float(row[6]),
+                        low_price=convert_float(row[7]),
+                        close_price=convert_float(row[8]),
+                        total_traded_quantity=convert_int(row[9]),
+                        total_traded_value=convert_float(row[10]),
+                        previous_close=convert_float(row[11]),
+                        fifty_two_week_high=convert_float(row[12]),
+                        fifty_two_week_low=convert_float(row[13]),
+                        last_updated_time=row[14].strip() or None,
+                        last_updated_price=convert_float(row[15]),
+                        total_trades=convert_int(row[16]),
+                        average_traded_price=convert_float(row[17]),
+                        market_capitalization=convert_float(row[18])
+                    )
+                    inserted_rows += 1
+                except Exception as e:
+                    print(f"Error inserting row: {e}")
+                    failed_rows += 1
+
+            messages.success(request, f"Upload successful! Inserted {inserted_rows} records for {business_date_str}. Skipped {failed_rows} rows.")
+
+        except Exception as e:
+            messages.error(request, f"An error occurred: {e}")
+
+        return redirect('nepse_data:data_entry')
+
+    else:
+        # --- HANDLE GET REQUEST ---
+        # Fetch available dates for the delete modal
+        available_dates = StockPrices.objects.values('business_date').distinct().order_by('-business_date')
+        context = {
+            'title': 'Data Entry Portal',
+            'available_dates': available_dates
+        }
+        return render(request, 'nepse_data/data_entry.html', context)
+
+@require_POST  # Ensures this view only accepts POST
+def delete_price_data_view(request):
+    dates_to_delete = request.POST.getlist('dates_to_delete')
+
+    if not dates_to_delete:
+        messages.warning(request, "No dates were selected for deletion.")
+        return redirect('nepse_data:data_entry')
+
+    try:
+        # Delete from 'stock_prices_adj' first (from other app)
+        StockPricesAdj.objects.filter(business_date__in=dates_to_delete).delete()
+
+        # Then delete from 'stock_prices'
+        count, _ = StockPrices.objects.filter(business_date__in=dates_to_delete).delete()
+
+        messages.success(request, f"Successfully deleted all price data for {len(dates_to_delete)} selected date(s).")
+
+    except Exception as e:
+        messages.error(request, f"An error occurred while deleting: {e}")
+
+    return redirect('nepse_data:data_entry')

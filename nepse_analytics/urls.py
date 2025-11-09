@@ -11,7 +11,7 @@ urlpatterns = [
 
     # --- We will build these later ---
     # Comment these out for now, because their urls.py files don't exist yet
-    # path('companies/', include('listed_companies.urls')),
-    # path('adjustments/', include('adjustments_stock_price.urls')),
+    path('companies/', include('listed_companies.urls')),
+    path('adjustments/', include('adjustments_stock_price.urls')),
     # path('analysis/', include('statistical_analysis.urls')),
 ]

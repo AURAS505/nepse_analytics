@@ -1,0 +1,102 @@
+{% extends 'base.html' %}
+
+{% block title %}Edit Company - {{ company.company_name }}{% endblock %}
+
+{% block content %}
+<div class="container my-5">
+    <div class="row">
+        <div class="col-lg-10 col-xl-8 mx-auto">
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-white py-3">
+                    <h4 class="mb-0">Edit Company: <span class="text-primary">{{ company.company_name }}</span></h4>
+                </div>
+                <div class="card-body p-4">
+
+                    {% if messages %}
+                        {% for message in messages %}
+                        <div class="alert alert-{{ message.tags }}">{{ message }}</div>
+                        {% endfor %}
+                    {% endif %}
+
+                    <form method="POST" action="{% url 'listed_companies:edit' company.nepse_code %}">
+                        {% csrf_token %} <div class="row g-3">
+                            <div class="col-md-6">
+                                <label for="nepse_code" class="form-label">NEPSE Code</label>
+                                <input type="text" id="nepse_code" name="nepse_code" class="form-control" value="{{ company.nepse_code }}" readonly disabled>
+                                <div class="form-text">NEPSE Code cannot be changed.</div>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="script_ticker" class="form-label">Script / Ticker</label>
+                                <input type="text" id="script_ticker" name="script_ticker" class="form-control" value="{{ company.script_ticker }}" required>
+                            </div>
+                            <div class="col-12">
+                                <label for="company_name" class="form-label">Company Name</label>
+                                <input type="text" id="company_name" name="company_name" class="form-control" value="{{ company.company_name }}" required>
+                            </div>
+
+                            <div class="col-md-6">
+                                <label for="sector" class="form-label">Sector</label>
+                                <select id="sector" name="sector" class="form-select">
+                                    <option value="Commercial Banks" {% if company.sector == 'Commercial Banks' %}selected{% endif %}>Commercial Banks</option>
+                                    <option value="Development Banks" {% if company.sector == 'Development Banks' %}selected{% endif %}>Development Banks</option>
+                                    <option value="Finance" {% if company.sector == 'Finance' %}selected{% endif %}>Finance</option>
+                                    <option value="Float" {% if company.sector == 'Float' %}selected{% endif %}>Float</option>
+                                    <option value="Hotels And Tourism" {% if company.sector == 'Hotels And Tourism' %}selected{% endif %}>Hotels And Tourism</option>
+                                    <option value="Hydro Power" {% if company.sector == 'Hydro Power' %}selected{% endif %}>Hydro Power</option>
+                                    <option value="Investment" {% if company.sector == 'Investment' %}selected{% endif %}>Investment</option>
+                                    <option value="Life Insurance" {% if company.sector == 'Life Insurance' %}selected{% endif %}>Life Insurance</option>
+                                    <option value="Manufacturing And Processing" {% if company.sector == 'Manufacturing And Processing' %}selected{% endif %}>Manufacturing And Processing</option>
+                                    <option value="Microfinance" {% if company.sector == 'Microfinance' %}selected{% endif %}>Microfinance</option>
+                                    <option value="Mutual Fund" {% if company.sector == 'Mutual Fund' %}selected{% endif %}>Mutual Fund</option>
+                                    <option value="Nepse" {% if company.sector == 'Nepse' %}selected{% endif %}>Nepse</option>
+                                    <option value="Non Life Insurance" {% if company.sector == 'Non Life Insurance' %}selected{% endif %}>Non Life Insurance</option>
+                                    <option value="Non-Convertible Debentures" {% if company.sector == 'Non-Convertible Debentures' %}selected{% endif %}>Non-Convertible Debentures</option>
+                                    <option value="Others" {% if company.sector == 'Others' %}selected{% endif %}>Others</option>
+                                    <option value="Sen. Float" {% if company.sector == 'Sen. Float' %}selected{% endif %}>Sen. Float</option>
+                                    <option value="Sensitive" {% if company.sector == 'Sensitive' %}selected{% endif %}>Sensitive</option>
+                                    <option value="Tradings" {% if company.sector == 'Tradings' %}selected{% endif %}>Tradings</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="type" class="form-label">Type</label>
+                                <select id="type" name="type" class="form-select">
+                                    <option value="Public" {% if company.type == 'Public' %}selected{% endif %}>Public</option>
+                                    <option value="Promoter" {% if company.type == 'Promoter' %}selected{% endif %}>Promoter</option>
+                                    <option value="Other" {% if company.type == 'Other' %}selected{% endif %}>Other</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="status" class="form-label">Status</label>
+                                <select id="status" name="status" class="form-select">
+                                    <option value="Active" {% if company.status == 'Active' %}selected{% endif %}>Active</option>
+                                    <option value="Suspended" {% if company.status == 'Suspended' %}selected{% endif %}>Suspended</option>
+                                    <option value="Delisted" {% if company.status == 'Delisted' %}selected{% endif %}>Delisted</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="instrument" class="form-label">Instrument</label>
+                                <select id="instrument" name="instrument" class="form-select">
+                                    <option value="Equity" {% if company.instrument == 'Equity' %}selected{% endif %}>Equity</option>
+                                    <option value="Non-Convertible Debentures" {% if company.instrument == 'Non-Convertible Debentures' %}selected{% endif %}>Non-Convertible Debentures</option>
+                                    <option value="Mutual Funds" {% if company.instrument == 'Mutual Funds' %}selected{% endif %}>Mutual Funds</option>
+                                    <option value="Other" {% if company.instrument == 'Other' %}selected{% endif %}>Other</option>
+                                </select>
+                            </div>
+
+                            <div class="col-md-6">
+                                <label for="par_value" class="form-label">Par Value</label>
+                                <input type="number" step="0.01" id="par_value" name="par_value" class="form-control" value="{{ company.par_value|floatformat:2 }}" min="0.01" required>
+                                <div class="form-text">e.g., 100, 50, or 10.</div>
+                            </div>
+                            <div class="col-12 text-end mt-4 pt-3 border-top">
+                                <a href="{% url 'listed_companies:list' %}" class="btn btn-secondary">Cancel</a>
+                                <button type="submit" class="btn btn-primary">Save Changes</button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

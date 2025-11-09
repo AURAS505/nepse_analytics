@@ -11,6 +11,10 @@ urlpatterns = [
         # Add this new line for the download
     path('download-stock-prices/', views.download_stock_prices_view, name='download_stock_prices'),
 
+    # --- ADD THESE TWO LINES ---
+    path('data-entry/', views.data_entry_view, name='data_entry'),
+    path('data-entry/delete/', views.delete_price_data_view, name='delete_price_data'),
+
     # We will add these soon
     # path('indices/', views.indices_view, name='indices'),
     # path('market-cap/', views.market_cap_view, name='market_cap'),

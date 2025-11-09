@@ -52,7 +52,7 @@
                     <div class="card-body">
                         <h5 class="card-title text-dark">Listed Companies</h5>
                         <p class="card-text">Browse, search, and manage all companies listed on the exchange.</p>
-                        <a href="#" class="btn btn-outline-dark">Manage Companies</a>
+                        <a href="{% url 'listed_companies:list' %}" class="btn btn-outline-dark">Manage Companies</a>
                     </div>
                 </div>
             </div>
@@ -113,7 +113,7 @@
                 <h2 class="display-6 fw-bold">Data Entry Portal</h2>
                 <p class="fs-5 text-muted">Manage and input new market data like prices, indices, and more.</p>
                 
-                <a href="#" class="btn btn-warning btn-lg mt-3">
+                <a href="{% url 'nepse_data:data_entry' %}" class="btn btn-warning btn-lg mt-3">
                             Go to Data Entry Page
                 </a>
             </div>
