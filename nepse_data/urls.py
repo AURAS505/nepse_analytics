@@ -17,4 +17,6 @@ urlpatterns = [
     # --- THESE ARE THE MISSING LINES ---
     path('market-cap/', views.market_cap_view, name='market_cap'),
     path('download-marcap/', views.download_marcap_view, name='download_marcap'),
+    path('floorsheet/', views.floorsheet_view, name='floorsheet'),
+    path('download-floorsheet/', views.download_floorsheet_view, name='download_floorsheet'),
 ]

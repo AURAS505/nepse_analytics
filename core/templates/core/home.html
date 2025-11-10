@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 
-{% block title %}Home - NEPSE Analytics{% endblock %}
+{% block title %}Home - Hathway Analytics Suite{% endblock %}
 
 {% block content %}
 <div class="row">
@@ -14,107 +14,111 @@
             </div>
         </div>
 
-        <h2 class="mb-3">Quick Access</h2>
+        <h2 class="mb-3">Analytics Dashboard</h2>
         <div class="row">
             
             <div class="col-lg-4 col-md-6 mb-4">
                 <div class="card h-100 shadow-sm">
-                    <div class="card-body">
-                        <h5 class="card-title text-primary">Today's Price</h5>
-                        <p class="card-text">View daily unadjusted and adjusted stock prices by date or company.</p>
-                        <a href="{% url 'nepse_data:todays_price' %}" class="btn btn-outline-primary">View Prices</a>
+                    <div class="card-body d-flex flex-column">
+                        <h5 class="card-title text-primary">Fundamentals</h5>
+                        <p class="card-text">Company’s intrinsic valuation & financial health.</p>
+                        <a href="#" class="btn btn-outline-primary mt-auto disabled">View Insights</a>
                     </div>
                 </div>
             </div>
             
             <div class="col-lg-4 col-md-6 mb-4">
                 <div class="card h-100 shadow-sm">
-                    <div class="card-body">
-                        <h5 class="card-title text-success">Indices</h5>
-                        <p class="card-text">Track the historical performance of the NEPSE index and sub-indices.</p>
-                        <a href="{% url 'nepse_data:indices' %}" class="btn btn-outline-success">View Indices</a>
+                    <div class="card-body d-flex flex-column">
+                        <h5 class="card-title text-success">Technical Charts</h5>
+                        <p class="card-text">Graphical and indicator-based analysis (RSI, MACD, MA).</p>
+                        <a href="#" class="btn btn-outline-success mt-auto disabled">View Charts</a>
                     </div>
                 </div>
             </div>
 
             <div class="col-lg-4 col-md-6 mb-4">
                 <div class="card h-100 shadow-sm">
-                    <div class="card-body">
-                        <h5 class="card-title text-info">Market Capitalization</h5>
-                        <p class="card-text">See the historical total and float market capitalization.</p>
-                        <a href="{% url 'nepse_data:market_cap' %}" class="btn btn-outline-info">View Market Cap</a>
+                    <div class="card-body d-flex flex-column">
+                        <h5 class="card-title text-info">Floorsheet Explorer</h5>
+                        <p class="card-text">Deep dive into NEPSE floorsheet data, turnover, and active stocks.</p>
+                        <a href="#" class="btn btn-outline-info mt-auto disabled">Explore Trades</a>
                     </div>
                 </div>
             </div>
 
             <div class="col-lg-4 col-md-6 mb-4">
                 <div class="card h-100 shadow-sm">
-                    <div class="card-body">
-                        <h5 class="card-title text-dark">Listed Companies</h5>
-                        <p class="card-text">Browse, search, and manage all companies listed on the exchange.</p>
-                        <a href="{% url 'listed_companies:list' %}" class="btn btn-outline-dark">Manage Companies</a>
+                    <div class="card-body d-flex flex-column">
+                        <h5 class="card-title text-dark">Statistical Insights</h5>
+                        <p class="card-text">Advanced metrics like correlation, beta, and volatility.</p>
+                        <a href="#" class="btn btn-outline-dark mt-auto disabled">Run Analysis</a>
                     </div>
                 </div>
             </div>
 
             <div class="col-lg-4 col-md-6 mb-4">
                 <div class="card h-100 shadow-sm">
-                    <div class="card-body">
-                        <h5 class="card-title text-danger">Statistical Analysis</h5>
-                        <p class="card-text">Run in-depth analysis (Beta, Sharpe) on stocks vs. market indices.</p>
-                        <a href="#" class="btn btn-outline-danger">Go to StatBoard</a>
+                    <div class="card-body d-flex flex-column">
+                        <h5 class="card-title text-warning">Mutual Fund Dashboard</h5>
+                        <p class="card-text">Analyze mutual fund performance and composition.</p>
+                        <a href="#" class="btn btn-outline-warning mt-auto disabled">View Funds</a>
                     </div>
                 </div>
             </div>
 
             <div class="col-lg-4 col-md-6 mb-4">
                 <div class="card h-100 shadow-sm">
-                    <div class="card-body">
-                        <h5 class="card-title text-primary">Live Floorsheet</h5>
-                        <p class="card-text">See real-time trading data as it happens on the exchange floor.</p>
-                        <a href="#" class="btn btn-outline-primary">View Floorsheet</a>
+                    <div class="card-body d-flex flex-column">
+                        <h5 class="card-title text-primary">My Portfolio</h5>
+                        <p class="card-text">Track holdings, performance, and returns.</p>
+                        <a href="#" class="btn btn-outline-primary mt-auto disabled">Open Tracker</a>
                     </div>
                 </div>
             </div>
 
             <div class="col-lg-4 col-md-6 mb-4">
                 <div class="card h-100 shadow-sm">
-                    <div class="card-body">
-                        <h5 class="card-title text-warning">Data Entry Portal</h5>
-                        <p class="card-text">Upload new 'Today's Price' CSV files and manage data.</p>
-                        <a href="{% url 'nepse_data:data_entry' %}" class="btn btn-outline-warning">Upload Data</a>
+                    <div class="card-body d-flex flex-column">
+                        <h5 class="card-title text-secondary">Accounting Desk</h5>
+                        <p class="card-text">Record and manage investment accounting activities.</p>
+                        <a href="#" class="btn btn-outline-secondary mt-auto disabled">Manage Ledger</a>
                     </div>
                 </div>
             </div>
 
             <div class="col-lg-4 col-md-6 mb-4">
                 <div class="card h-100 shadow-sm">
-                    <div class="card-body">
-                        <h5 class="card-title text-secondary">Price Adjustment Tool</h5>
-                        <p class="card-text">Manage bonus/right share adjustments and recalculate prices.</p>
-                        <a href="{% url 'adjustments_stock_price:index' %}" class="btn btn-outline-secondary">Open Tool</a>
+                    <div class="card-body d-flex flex-column">
+                        <h5 class="card-title text-success">Other Analytics</h5>
+                        <p class="card-text">Catch-all for extra tools — IPOs, dividends, insider data, etc.</p>
+                        <a href="#" class="btn btn-outline-success mt-auto disabled">View Tools</a>
                     </div>
                 </div>
             </div>
 
             <div class="col-lg-4 col-md-6 mb-4">
                 <div class="card h-100 shadow-sm border-danger">
-                    <div class="card-body">
+                    <div class="card-body d-flex flex-column">
                         <h5 class="card-title text-danger">Admin Panel</h5>
                         <p class="card-text">Directly access the main Django admin site to manage all data.</p>
-                        <a href="/admin/" class="btn btn-outline-danger" target="_blank">Open Admin</a>
+                        <a href="/admin/" class="btn btn-outline-danger mt-auto" target="_blank">Open Admin</a>
                     </div>
                 </div>
             </div>
 
         </div> <hr class="my-5">
+
         <div class="p-5 mb-4 bg-white rounded-3 shadow-sm border text-center">
             <div class="container-fluid py-3">
                 <h2 class="display-6 fw-bold">Data Entry Portal</h2>
                 <p class="fs-5 text-muted">Manage and input new market data like prices, indices, and more.</p>
+                
                 <a href="{% url 'nepse_data:data_entry' %}" class="btn btn-warning btn-lg mt-3">
                             Go to Data Entry Page
                 </a>
             </div>
         </div>
-        </div> </div> {% endblock %}
+    </div>
+</div>
+{% endblock %}

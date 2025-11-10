@@ -11,14 +11,9 @@
                 Stock Price Adjustment Tool &rarr;
             </a>
         </div>
+
         <h1 class="display-6 fw-bold">Data Input Portal</h1>
         <p class="fs-5 text-muted">Upload new market data files directly into the database.</p>
-
-        ```
-
----
-
-Save both files. Now, the link will be gone from the "Today's Price" page and will appear at the top right of your "Data Entry Portal" page.
 
         {% if messages %}
             {% for message in messages %}
@@ -53,10 +48,12 @@ Save both files. Now, the link will be gone from the "Today's Price" page and wi
 
                     <div class="text-end mt-4">
                         <button type="button" class="btn btn-danger btn-lg" data-bs-toggle="modal" data-bs-target="#deletePriceModal">
+                            <i class="bi bi-trash"></i>
                             Delete Price Data
                         </button>
-
+                        
                         <button type="submit" name="action" value="upload_price" class="btn btn-primary btn-lg ms-2">
+                            <i class="bi bi-upload"></i>
                             Upload Price Data
                         </button>
                     </div>
@@ -70,44 +67,36 @@ Save both files. Now, the link will be gone from the "Today's Price" page and wi
         </div>
 
         <div class="card shadow-sm border-0 mt-5">
-            <div class="card-header bg-warning">
-                <h5 class="mb-0">Recalculate All Adjusted Prices</h5>
+            <div class="card-header bg-success text-white">
+                <h5 class="mb-0">Upload Indices Data (CSV)</h5>
             </div>
             <div class="card-body p-4">
                 <p class="card-text">
-                    Click this button to run the optimized recalculation process. This will:
-                    <br>1. Run a full adjustment for all symbols <strong>with</strong> corporate actions (bonus/right).
-                    <br>2. Run a fast copy for all symbols <strong>without</strong> corporate actions.
-                    <br>This ensures all 52-week high/low values are populated correctly.
+                    Upload a CSV file containing the daily indices data.
+                    The system will skip any dates that already exist.
                 </p>
-                <div class="text-end">
-                    <button id="startRecalcButton" class="btn btn-warning btn-lg">
-                        Start Full Recalculation
-                    </button>
-                </div>
-
-                <div id="progressSection" class="mt-4" style="display: none;">
-                    <div class="progress" role="progressbar" aria-label="Recalculation progress" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" style="height: 25px;">
-                        <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated bg-warning text-dark" style="width: 0%">
-                            <span id="progressText" class="fw-bold">Starting...</span>
+                <hr>
+                <form method="POST" action="{% url 'nepse_data:data_entry' %}" enctype="multipart/form-data" class="needs-validation" novalidate>
+                    {% csrf_token %}
+                    <div class="row g-3">
+                        <div class="col-md-12">
+                            <label for="indices_file" class="form-label"><b>Indices CSV File</b><span class="text-danger">*</span></label>
+                            <input class="form-control" type="file" id="indices_file" name="indices_file" accept=".csv" required>
+                            <div class="invalid-feedback">
+                                Please select a .csv file to upload.
+                            </div>
                         </div>
                     </div>
-                    <div class="text-center mt-2">
-                        <small id="progressMessage" class="text-muted">Initializing job...</small>
+
+                    <div class="text-end mt-4">
+                        <button type="submit" name="action" value="upload_indices" class="btn btn-success btn-lg ms-2">
+                            <i class="bi bi-upload"></i>
+                            Upload Indices Data
+                        </button>
                     </div>
-                    <div id="jobCompleteControls" class="text-center mt-2" style="display: none;">
-                        <button id="clearJobButton" class="btn btn-sm btn-outline-secondary">Clear</button>
-                    </div>
-                </div>
+                </form>
             </div>
         </div>
-
-        <div class="card shadow-sm border-0 mt-5">
-        <div class="card-header bg-success text-white">
-            <h5 class="mb-0">Upload Indices Data (CSV)</h5>
-        </div>
-        </div>
-
 
         <div class="card shadow-sm border-0 mt-5">
             <div class="card-header bg-info text-white">
@@ -133,34 +122,51 @@ Save both files. Now, the link will be gone from the "Today's Price" page and wi
 
                     <div class="text-end mt-4">
                         <button type="submit" name="action" value="upload_marcap" class="btn btn-info btn-lg ms-2">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-upload" viewBox="0 0 16 16">
-                                <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5"/>
-                                <path d="M7.646 1.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1-.708.708L8.5 2.707V11.5a.5.5 0 0 1-1 0V2.707L5.354 4.854a.5.5 0 1 1-.708-.708z"/>
-                            </svg>
+                            <i class="bi bi-upload"></i>
                             Upload Market Cap Data
                         </button>
                     </div>
                 </form>
             </div>
         </div>
+
         <div class="card shadow-sm border-0 mt-5">
+            <div class="card-header bg-warning">
+                <h5 class="mb-0">Recalculate All Adjusted Prices</h5>
             </div>
-                    <div class="text-end mt-4">
-                        <button type="submit" name="action" value="upload_indices" class="btn btn-success btn-lg ms-2">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-upload" viewBox="0 0 16 16">
-                                <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5"/>
-                                <path d="M7.646 1.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1-.708.708L8.5 2.707V11.5a.5.5 0 0 1-1 0V2.707L5.354 4.854a.5.5 0 1 1-.708-.708z"/>
-                            </svg>
-                            Upload Indices Data
-                        </button>
+            <div class="card-body p-4">
+                <p class="card-text">
+                    Click this button to run the optimized recalculation process. This will:
+                    <br>1. Run a full adjustment for all symbols <strong>with</strong> corporate actions (bonus/right).
+                    <br>2. Run a fast copy for all symbols <strong>without</strong> corporate actions.
+                    <br>This ensures all 52-week high/low values are populated correctly.
+                </p>
+                <div class="text-end">
+                    <button id="startRecalcButton" class="btn btn-warning btn-lg">
+                        <i class="bi bi-arrow-clockwise"></i>
+                        Start Full Recalculation
+                    </button>
+                </div>
+
+                <div id="progressSection" class="mt-4" style="display: none;">
+                    <div class="progress" role="progressbar" aria-label="Recalculation progress" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" style="height: 25px;">
+                        <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated bg-warning text-dark" style="width: 0%">
+                            <span id="progressText" class="fw-bold">Starting...</span>
+                        </div>
                     </div>
-                </form>
+                    <div class="text-center mt-2">
+                        <small id="progressMessage" class="text-muted">Initializing job...</small>
+                    </div>
+                    <div id="jobCompleteControls" class="text-center mt-2" style="display: none;">
+                        <button id="clearJobButton" class="btn btn-sm btn-outline-secondary">Clear</button>
+                    </div>
+                </div>
             </div>
         </div>
-
-
-
         
+    </div>
+</div>
+
 
 <div class="modal fade" id="deletePriceModal" tabindex="-1" aria-labelledby="deletePriceModalLabel" aria-hidden="true">
     <div class="modal-dialog">
@@ -173,7 +179,7 @@ Save both files. Now, the link will be gone from the "Today's Price" page and wi
                 {% csrf_token %} <div class="modal-body">
                     <p>Select one or more dates to <strong>permanently delete</strong> all associated price data.
                     <br><small class="text-muted">(Hold Ctrl or Cmd to select multiple dates)</small></p>
-
+                    
                     <div class="form-group">
                         <label for="dates_to_delete" class="form-label">Available Dates:</label>
                         <select class="form-select" 
@@ -198,6 +204,7 @@ Save both files. Now, the link will be gone from the "Today's Price" page and wi
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                     <button type="submit" class="btn btn-danger" {% if not available_dates %}disabled{% endif %}>
+                        <i class="bi bi-trash-fill"></i>
                         Confirm Delete
                     </button>
                 </div>
@@ -258,7 +265,7 @@ document.addEventListener('DOMContentLoaded', function() {
         jobCompleteControls.style.display = 'none';
         setProgressBar(0, 'Starting...', 'Initializing job...', 'bg-warning', true);
         
-        // Get the CSRF token to send with our POST request
+        // Find the *first* CSRF token on the page (more reliable)
         const csrfToken = document.querySelector('input[name="csrfmiddlewaretoken"]').value;
 
         // Call the "start" endpoint
@@ -287,10 +294,9 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 
-    // --- 2. Poll for Status (THIS IS THE UPDATED LOGIC) ---
+    // --- 2. Poll for Status (Reads Celery's state) ---
     function startPolling(jobId) {
         pollingInterval = setInterval(() => {
-            // Use the URL from our JSON blob, and add the job ID
             fetch(`${URLS.recalcStatus}${jobId}/`)
             .then(response => response.json())
             .then(status => {
@@ -301,24 +307,16 @@ document.addEventListener('DOMContentLoaded', function() {
                     percent = (status.progress / status.total) * 100;
                 }
                 
-                // This answers your request:
-                // It shows the detailed message from the task, e.g., "Adjusting NABIL..."
                 progressMessage.innerText = status.message || '...';
                 
-                // Celery states are UPPERCASE
                 if (status.status === 'running' || status.status === 'PROGRESS') {
-                    // This answers your request:
-                    // It shows the % in the bar
                     setProgressBar(percent, `${Math.round(percent)}%`, status.message, 'bg-warning', true);
                 } 
                 else if (status.status === 'complete' || status.status === 'SUCCESS') {
-                    // This answers your request:
-                    // It now shows the "Complete!" message
                     setProgressBar(100, 'Complete!', status.message, 'bg-success', false);
                     finishPolling(jobId, false);
                 }
                 else if (status.status === 'error' || status.status === 'FAILURE') {
-                    // It now shows an error
                     setProgressBar(100, 'Error!', status.message, 'bg-danger', false);
                     finishPolling(jobId, true);
                 }
@@ -334,7 +332,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }, 1500); 
     }
     
-    // --- (setProgressBar, finishPolling, clearJobButton are unchanged) ---
     function setProgressBar(percent, text, message, barClass, isAnimated) {
         progressBar.style.width = percent + '%';
         progressBar.setAttribute('aria-valuenow', percent);

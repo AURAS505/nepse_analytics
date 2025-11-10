@@ -31,7 +31,7 @@
 
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark shadow-sm">
         <div class="container-fluid">
-            <a class="navbar-brand" href="{% url 'home' %}">Hathway Analytics Suite</a>
+            <a class="navbar-brand" href="{% url 'home' %}">  HATHLYTICS  </a>
             
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNavbar" aria-controls="mainNavbar" aria-expanded="false" aria-label="Toggle navigation">
                 <span class="navbar-toggler-icon"></span>
@@ -48,7 +48,7 @@
                             NEPSE
                         </a>
                         <ul class="dropdown-menu" aria-labelledby="nepseDropdown">
-                            <li><a class="dropdown-item" href="#">Floorsheet</a></li>
+                            <li><a class="dropdown-item" href="{% url 'nepse_data:floorsheet' %}">Floorsheet</a></li>
                             <li><a class="dropdown-item" href="{% url 'nepse_data:indices' %}">Indices</a></li>
                             <li><a class="dropdown-item" href="{% url 'nepse_data:market_cap' %}">Market Capitalization</a></li>
                             <li><a class="dropdown-item" href="#">N Day's Trading Average Price</a></li>

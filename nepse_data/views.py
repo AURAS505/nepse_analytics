@@ -3,18 +3,57 @@ from django.shortcuts import render, redirect
 from django.db import connection
 from django.db.models import Q, Max
 from listed_companies.models import Companies
-from .models import StockPrices, Indices # Make sure Indices is imported
+from .models import StockPrices, Indices, Marcap
 import datetime
 from django.http import HttpResponse
 from django.contrib import messages
 from django.views.decorators.http import require_POST
-from adjustments_stock_price.models import StockPricesAdj # Import from other app
+from adjustments_stock_price.models import StockPricesAdj
 import io
 import csv
+import pandas as pd  # <-- THIS WAS THE MISSING IMPORT
 from decimal import Decimal, InvalidOperation
 from django.core.paginator import Paginator
-from .models import StockPrices, Indices, Marcap
-import pandas as pd
+from .models import StockPrices, Indices, Marcap, FloorsheetRaw
+from django.db.models import Q, Max
+from django.db.models import Q, Max, Sum
+
+# ==================================
+# --- CONSOLIDATED HELPER FUNCTIONS ---
+# ==================================
+
+def clean_decimal(value):
+    """
+    Safely converts any input (str, float, int) with commas 
+    to a Decimal or None.
+    """
+    if value is None: return None
+    if not isinstance(value, str):
+        value = str(value)
+    if value.strip() in ('', 'N/A', '-'):
+        return None
+    try:
+        return Decimal(value.replace(',', ''))
+    except (InvalidOperation, ValueError, TypeError):
+        print(f"Could not convert '{value}' to Decimal")
+        return None
+
+def clean_int(value):
+    """
+    Safely converts any input (str, float, int) with commas 
+    and .00 decimals to an Integer or None.
+    """
+    if value is None: return None
+    if not isinstance(value, str):
+        value = str(value)
+    if value.strip() in ('', 'N/A', '-'):
+        return None
+    try:
+        # Use float first to handle "40,591.00"
+        return int(float(value.replace(',', '')))
+    except (InvalidOperation, ValueError, TypeError):
+        print(f"Could not convert '{value}' to Integer")
+        return None
 
 # A helper function to fetch raw SQL as a dictionary
 def dictfetchall(cursor):
@@ -25,8 +64,12 @@ def dictfetchall(cursor):
         for row in cursor.fetchall()
     ]
 
+# ==================================
+# --- ALL YOUR VIEWS (Corrected) ---
+# ==================================
+
 def todays_price_view(request):
-    # (This view is unchanged)
+    # (This view is unchanged and correct)
     view = request.GET.get('view', 'date')
     selected_date_str = request.GET.get('selected_date')
     search_term = request.GET.get('search_term', '').strip()
@@ -156,7 +199,7 @@ def todays_price_view(request):
     return render(request, 'nepse_data/todays_price.html', context)
 
 def download_stock_prices_view(request):
-    # (This view is unchanged)
+    # (This view is unchanged and correct)
     view = request.GET.get('view', 'date')
     selected_date_str = request.GET.get('selected_date')
     search_term = request.GET.get('search_term', '').strip()
@@ -263,69 +306,19 @@ def download_stock_prices_view(request):
             writer.writerow([getattr(row, field) for field in headers])
     return response
 
-# --- Helper functions ---
-def convert_float(value):
-    """ Safely convert a string (with commas) to a Decimal """
-    if not isinstance(value, str):
-        value = str(value)
-    if not value or value.strip() in ('', 'N/A', '-'):
-        return None
-    try:
-        return Decimal(value.replace(',', ''))
-    except InvalidOperation:
-        return None
-
-def convert_int(value):
-    """ Safely convert a string (with commas) to an Integer """
-    if not isinstance(value, str):
-        value = str(value)
-    if not value or value.strip() in ('', 'N/A', '-'):
-        return None
-    try:
-        # Use float first to handle decimals (e.g., 40591.00)
-        return int(float(value.replace(',', '')))
-    except (ValueError, InvalidOperation, TypeError):
-        return None
-
-def to_float(value):
-    """ Safely convert a string (with commas) to a Float """
-    if not isinstance(value, str):
-        value = str(value)
-    if not value or value.strip() in ('', 'N/A', '-'):
-        return None
-    try:
-        return float(value.replace(',', ''))
-    except (ValueError, TypeError):
-        return None
-
-def to_int(value):
-    """ Safely convert a string (with commas) to an Integer """
-    if not isinstance(value, str):
-        value = str(value)
-    if not value or value.strip() in ('', 'N/A', '-'):
-        return None
-    try:
-        return int(float(value.replace(',', '')))
-    except (ValueError, TypeError):
-        return None
-
-# --- Main View for Data Entry Page ---
+# --- Main View for Data Entry Page (CORRECTED) ---
 def data_entry_view(request):
     if request.method == 'POST':
         if request.POST.get('action') == 'upload_price':
-            # --- HANDLE PRICE UPLOAD ---
+            # --- HANDLE PRICE UPLOAD (NOW USES CLEAN HELPERS) ---
             price_file = request.FILES.get('price_file')
-            
             if not price_file:
                 messages.error(request, "No file selected for uploading.")
                 return redirect('nepse_data:data_entry')
-            
             if not price_file.name.endswith('.csv'):
                 messages.error(request, "Invalid file type. Please upload a .csv file.")
                 return redirect('nepse_data:data_entry')
-
             try:
-                # (Your existing price upload logic is unchanged)
                 csv_file = io.TextIOWrapper(price_file.file, encoding='utf-8')
                 reader = csv.reader(csv_file)
                 header = next(reader)
@@ -361,20 +354,20 @@ def data_entry_view(request):
                             security_id=row[2].strip(),
                             symbol=row[3].strip(),
                             security_name=row[4].strip(),
-                            open_price=convert_float(row[5]),
-                            high_price=convert_float(row[6]),
-                            low_price=convert_float(row[7]),
-                            close_price=convert_float(row[8]),
-                            total_traded_quantity=convert_int(row[9]),
-                            total_traded_value=convert_float(row[10]),
-                            previous_close=convert_float(row[11]),
-                            fifty_two_week_high=convert_float(row[12]),
-                            fifty_two_week_low=convert_float(row[13]),
+                            open_price=clean_decimal(row[5]),
+                            high_price=clean_decimal(row[6]),
+                            low_price=clean_decimal(row[7]),
+                            close_price=clean_decimal(row[8]),
+                            total_traded_quantity=clean_int(row[9]),
+                            total_traded_value=clean_decimal(row[10]),
+                            previous_close=clean_decimal(row[11]),
+                            fifty_two_week_high=clean_decimal(row[12]),
+                            fifty_two_week_low=clean_decimal(row[13]),
                             last_updated_time=row[14].strip() or None,
-                            last_updated_price=convert_float(row[15]),
-                            total_trades=convert_int(row[16]),
-                            average_traded_price=convert_float(row[17]),
-                            market_capitalization=convert_float(row[18])
+                            last_updated_price=clean_decimal(row[15]),
+                            total_trades=clean_int(row[16]),
+                            average_traded_price=clean_decimal(row[17]),
+                            market_capitalization=clean_decimal(row[18])
                         )
                         inserted_rows += 1
                     except Exception as e:
@@ -383,11 +376,10 @@ def data_entry_view(request):
                 messages.success(request, f"Upload successful! Inserted {inserted_rows} price records for {business_date_str}. Skipped {failed_rows} rows.")
             except Exception as e:
                 messages.error(request, f"An error occurred: {e}")
-            
             return redirect('nepse_data:data_entry')
 
         elif request.POST.get('action') == 'upload_indices':
-            # --- HANDLE INDICES UPLOAD (Unchanged) ---
+            # --- HANDLE INDICES UPLOAD (NOW USES CLEAN HELPERS & DECIMAL MODEL) ---
             indices_file = request.FILES.get('indices_file')
             if not indices_file:
                 messages.error(request, "No indices file selected.")
@@ -407,20 +399,21 @@ def data_entry_view(request):
                         if Indices.objects.filter(date=row_date, sector=row_sector).exists():
                             skipped_rows += 1
                             continue
+                        
                         Indices.objects.create(
-                            sn=to_int(row[0]),
+                            sn=clean_int(row[0]),
                             date=row_date,
-                            open=to_float(row[2]),
-                            high=to_float(row[3]),
-                            low=to_float(row[4]),
-                            close=to_float(row[5]),
-                            absolute_change=to_float(row[6]),
+                            open=clean_decimal(row[2]),
+                            high=clean_decimal(row[3]),
+                            low=clean_decimal(row[4]),
+                            close=clean_decimal(row[5]),
+                            absolute_change=clean_decimal(row[6]),
                             percentage_change=row[7] or None,
-                            number_52_weeks_high=to_float(row[8]),
-                            number_52_weeks_low=to_float(row[9]),
-                            turnover_values=to_float(row[10]),
-                            turnover_volume=to_int(row[11]),
-                            total_transaction=to_int(row[12]),
+                            number_52_weeks_high=clean_decimal(row[8]),
+                            number_52_weeks_low=clean_decimal(row[9]),
+                            turnover_values=clean_decimal(row[10]),
+                            turnover_volume=clean_int(row[11]),
+                            total_transaction=clean_int(row[12]),
                             sector=row_sector
                         )
                         inserted_rows += 1
@@ -432,59 +425,48 @@ def data_entry_view(request):
                 messages.error(request, f"An error occurred during indices upload: {e}")
             return redirect('nepse_data:data_entry')
 
-        # --- THIS IS THE NEW BLOCK ---
         elif request.POST.get('action') == 'upload_marcap':
+            # --- HANDLE MARKET CAP UPLOAD (THIS IS THE CORRECTED LOGIC) ---
             marcap_file = request.FILES.get('marcap_file')
-
             if not marcap_file:
                 messages.error(request, "No market cap file selected.")
                 return redirect('nepse_data:data_entry')
-            
             if not marcap_file.name.endswith('.csv'):
                 messages.error(request, "Invalid file type. Please upload a .csv file.")
                 return redirect('nepse_data:data_entry')
             
             try:
-                # Use pandas to read the CSV, it handles the comma-separators in numbers well
                 df = pd.read_csv(marcap_file)
                 
-                # Clean column names (remove spaces, fix spelling, make lowercase)
                 df.columns = df.columns.str.strip().str.lower().str.replace(' ', '_')
                 
-                # Fix 'bussiness_date' typo from CSV
                 if 'bussiness_date' in df.columns:
                     df.rename(columns={'bussiness_date': 'business_date'}, inplace=True)
 
-                # Check for required columns
                 required_cols = ['business_date', 'market_capitalization', 'total_turnover']
-                if not all(col in df.columns for col in df.columns):
+                if not all(col in df.columns for col in required_cols):
                     missing = [col for col in required_cols if col not in df.columns]
                     messages.error(request, f"CSV is missing required columns. Must include: {', '.join(missing)}")
                     return redirect('nepse_data:data_entry')
 
-                inserted_rows = 0
-                updated_rows = 0
-                failed_rows = 0
+                inserted_rows, updated_rows, failed_rows = 0, 0, 0
                 
                 for index, row in df.iterrows():
                     try:
-                        # Parse date
                         row_date = pd.to_datetime(row['business_date']).date()
 
-                        # Create data dict for update_or_create
                         data_to_insert = {
-                            'sn': to_int(row.get('s.n')),
-                            'market_capitalization': convert_float(row.get('market_capitalization')),
-                            'sensitive_market_capitalization': convert_float(row.get('sensitive_market_capitalization')),
-                            'float_market_capitalization': convert_float(row.get('float_market_capitalization')),
-                            'sensitive_float_market_capitalization': convert_float(row.get('sensitive_float_market_capitalization')),
-                            'total_turnover': convert_float(row.get('total_turnover')),
-                            'total_traded_shares': to_int(row.get('total_traded_shares')),
-                            'total_transactions': to_int(row.get('total_transactions')),
-                            'total_scrips_traded': to_int(row.get('total_scrips_traded')),
+                            'sn': clean_int(row.get('s.n')),
+                            'market_capitalization': clean_decimal(row.get('market_capitalization')),
+                            'sensitive_market_capitalization': clean_decimal(row.get('sensitive_market_capitalization')),
+                            'float_market_capitalization': clean_decimal(row.get('float_market_capitalization')),
+                            'sensitive_float_market_capitalization': clean_decimal(row.get('sensitive_float_market_capitalization')),
+                            'total_turnover': clean_decimal(row.get('total_turnover')),
+                            'total_traded_shares': clean_int(row.get('total_traded_shares')),
+                            'total_transactions': clean_int(row.get('total_transactions')),
+                            'total_scrips_traded': clean_int(row.get('total_scrips_traded')),
                         }
                         
-                        # Use update_or_create to prevent duplicates
                         obj, created = Marcap.objects.update_or_create(
                             business_date=row_date,
                             defaults=data_to_insert
@@ -500,12 +482,10 @@ def data_entry_view(request):
                         failed_rows += 1
 
                 messages.success(request, f"Market Cap upload successful! Created {inserted_rows} new records. Updated {updated_rows} records. Failed {failed_rows} rows.")
-
             except Exception as e:
                 messages.error(request, f"An error occurred during market cap upload: {e}")
-
             return redirect('nepse_data:data_entry')
-        # --- END OF NEW BLOCK ---
+        # --- END OF CORRECTED BLOCK ---
 
     else:
         # --- HANDLE GET REQUEST (Unchanged) ---
@@ -518,7 +498,7 @@ def data_entry_view(request):
 
 @require_POST
 def delete_price_data_view(request):
-    # (This view is unchanged)
+    # (This view is unchanged and correct)
     dates_to_delete = request.POST.getlist('dates_to_delete')
     if not dates_to_delete:
         messages.warning(request, "No dates were selected for deletion.")
@@ -531,10 +511,9 @@ def delete_price_data_view(request):
         messages.error(request, f"An error occurred while deleting: {e}")
     return redirect('nepse_data:data_entry')
 
-# --- THIS IS THE CORRECTED VIEW ---
 def indices_view(request):
+    # (This view is unchanged and correct)
     indices_data = []
-
     view = request.GET.get('view', 'date')
     selected_date_str = request.GET.get('selected_date')
     search_term = request.GET.get('search_term', '').strip()
@@ -542,9 +521,7 @@ def indices_view(request):
     per_page_str = request.GET.get('per_page', '20')
     query_date = None
     title = "Indices Data"
-
     all_indices_list = Indices.objects.values('sector').distinct().order_by('sector')
-
     if view == 'date':
         title = "Indices by Date"
         if selected_date_str:
@@ -553,28 +530,18 @@ def indices_view(request):
             except ValueError:
                 query_date = None
         else:
-            # FIX: 'date' is now a DateField, so .date() is not needed
             latest_date_result = Indices.objects.aggregate(max_date=Max('date'))
             if latest_date_result['max_date']:
                 query_date = latest_date_result['max_date']
-
         if query_date:
-            # FIX: We don't need '__date' anymore, just filter on 'date'
             indices_data = Indices.objects.filter(date=query_date).order_by('sector')
             selected_date_str = query_date.isoformat()
-
         context = {
-            'indices_data': indices_data,
-            'title': title,
-            'selected_date_str': selected_date_str,
-            'view': view,
-            'all_indices_list': all_indices_list,
-            'total_pages': 1,
-            'page': 1,
+            'indices_data': indices_data, 'title': title, 'selected_date_str': selected_date_str,
+            'view': view, 'all_indices_list': all_indices_list, 'total_pages': 1, 'page': 1,
             'per_page': per_page_str,
         }
         return render(request, 'nepse_data/indices.html', context)
-
     elif view == 'indices':
         base_query = Indices.objects.all() 
         if search_term:
@@ -582,41 +549,28 @@ def indices_view(request):
             base_query = base_query.filter(sector=search_term)
         else:
             title = "Full Index History"
-
         base_query = base_query.order_by('-date', 'sector')
-
         if per_page_str == 'All':
             paginator = None
             page_obj = base_query
         else:
             paginator = Paginator(base_query, int(per_page_str), allow_empty_first_page=True)
             page_obj = paginator.get_page(page)
-
         context = {
-            'indices_data': page_obj,
-            'title': title,
-            'view': view,
-            'search_term': search_term,
-            'all_indices_list': all_indices_list,
-            'page_obj': page_obj if paginator else None,
-            'paginator': paginator,
-            'per_page': per_page_str,
-            'page': page,
+            'indices_data': page_obj, 'title': title, 'view': view, 'search_term': search_term,
+            'all_indices_list': all_indices_list, 'page_obj': page_obj if paginator else None,
+            'paginator': paginator, 'per_page': per_page_str, 'page': page,
         }
         return render(request, 'nepse_data/indices.html', context)
-
     return render(request, 'nepse_data/indices.html', {'title': 'Indices', 'view': view})
-# --- END OF CORRECTED VIEW ---
-
 
 def download_indices_view(request):
+    # (This view is unchanged and correct)
     view = request.GET.get('view', 'date')
     search_term = request.GET.get('search_term', '').strip()
     selected_date_str = request.GET.get('selected_date')
-
     query = Indices.objects.all()
     download_name = "indices_data.csv"
-
     if view == 'date':
         query_date = None
         if selected_date_str:
@@ -625,16 +579,12 @@ def download_indices_view(request):
             except ValueError:
                 query_date = None
         else:
-            # FIX: 'date' is now a DateField, so .date() is not needed
             latest_date_result = Indices.objects.aggregate(max_date=Max('date'))
             if latest_date_result['max_date']:
                 query_date = latest_date_result['max_date']
-
         if query_date:
-            # FIX: We don't need '__date' anymore
             query = query.filter(date=query_date).order_by('sector')
             download_name = f'indices_by_date_{query_date}.csv'
-
     elif view == 'indices':
         if search_term:
             query = query.filter(sector=search_term)
@@ -642,64 +592,37 @@ def download_indices_view(request):
         else:
             download_name = 'indices_history_all.csv'
         query = query.order_by('-date', 'sector')
-
     indices_data = query.values_list(
         'id', 'sn', 'date', 'sector', 'open', 'high', 'low', 'close',
         'absolute_change', 'percentage_change', 'number_52_weeks_high', 
         'number_52_weeks_low', 'turnover_values', 'turnover_volume', 'total_transaction'
     )
-
     if not indices_data.exists():
         return HttpResponse("No index data to download for that query.", status=404)
-
     response = HttpResponse(content_type='text/csv')
     response['Content-Disposition'] = f'attachment; filename="{download_name}"'
-
     writer = csv.writer(response)
     writer.writerow([
         'id', 'sn', 'date', 'sector', 'open', 'high', 'low', 'close',
         'absolute_change', 'percentage_change', '52_weeks_high', 
         '52_weeks_low', 'turnover_values', 'turnover_volume', 'total_transaction'
     ])
-
     for row in indices_data:
         writer.writerow(row)
-
     return response
 
-# Add these two new functions
-def to_float(value):
-    if not value or value.strip() in ('', 'N/A', '-'):
-        return None
-    try:
-        return float(value.replace(',', ''))
-    except (ValueError, TypeError):
-        return None
-
-def to_int(value):
-    if not value or value.strip() in ('', 'N/A', '-'):
-        return None
-    try:
-        return int(float(value.replace(',', '')))
-    except (ValueError, TypeError):
-        return None
-    
-
 def market_cap_view(request):
+    # (This view is unchanged and correct)
     title = "Market Capitalization History"
-
     page = request.GET.get('page', 1)
     per_page_str = request.GET.get('per_page', '20')
-
     base_query = Marcap.objects.all().order_by('-business_date')
-
     if per_page_str == 'All':
         paginator = None
         page_obj = base_query
     else:
         paginator = Paginator(base_query, int(per_page_str), allow_empty_first_page=True)
         page_obj = paginator.get_page(page)
-
     context = {
         'marcap_data': page_obj,
         'title': title,
@@ -710,9 +633,8 @@ def market_cap_view(request):
     }
     return render(request, 'nepse_data/market_cap.html', context)
 
-
 def download_marcap_view(request):
-    # Updated to include new fields
+    # (This view is unchanged and correct)
     marcap_data = Marcap.objects.all().order_by('-business_date').values_list(
         'id', 'sn', 'business_date', 'market_capitalization',
         'sensitive_market_capitalization', 'float_market_capitalization',
@@ -720,15 +642,11 @@ def download_marcap_view(request):
         'total_turnover', 'total_traded_shares', 'total_transactions', 'total_scrips_traded',
         'created_at'
     )
-
     if not marcap_data.exists():
         return HttpResponse("No market cap data to download.", status=404)
-
     response = HttpResponse(content_type='text/csv')
     response['Content-Disposition'] = 'attachment; filename="market_cap_history.csv"'
-
     writer = csv.writer(response)
-    # Write updated headers
     writer.writerow([
         'id', 'sn', 'business_date', 'market_capitalization',
         'sensitive_market_capitalization', 'float_market_capitalization',
@@ -736,10 +654,165 @@ def download_marcap_view(request):
         'total_turnover', 'total_traded_shares', 'total_transactions', 'total_scrips_traded',
         'created_at'
     ])
-
-    # Write data
     for row in marcap_data:
+        writer.writerow(row)
+    return response
+
+def floorsheet_view(request):
+    title = "Floorsheet History"
+
+    # --- Get filter parameters ---
+    selected_date_str = request.GET.get('selected_date')
+    contract_no = request.GET.get('contract_no', '').strip()
+    stock_symbol = request.GET.get('stock_symbol', '').strip()
+    buyer = request.GET.get('buyer', '').strip()
+    seller = request.GET.get('seller', '').strip()
+
+    # --- Get pagination parameters ---
+    page = request.GET.get('page', 1)
+    per_page_str = request.GET.get('per_page', '20')
+
+    # --- NEW: Get sorting parameters ---
+    sort_by = request.GET.get('sort', 'contract_no')
+    direction = request.GET.get('dir', 'desc')
+
+    # --- NEW: Whitelist allowed sort fields to prevent errors/injection ---
+    allowed_sort_fields = ['contract_no', 'quantity', 'amount']
+    if sort_by not in allowed_sort_fields:
+        sort_by = 'contract_no'
+    if direction not in ['asc', 'desc']:
+        direction = 'desc'
+
+    # --- Base query ---
+    base_query = FloorsheetRaw.objects.all()
+
+    # --- 1. Date Filter ---
+    query_date = None
+    if selected_date_str:
+        try:
+            query_date = datetime.date.fromisoformat(selected_date_str)
+        except ValueError:
+            query_date = None
+    else:
+        latest_date_result = FloorsheetRaw.objects.aggregate(max_date=Max('calculation_date'))
+        if latest_date_result['max_date']:
+            query_date = latest_date_result['max_date']
+
+    if query_date:
+        base_query = base_query.filter(calculation_date=query_date)
+        selected_date_str = query_date.isoformat()
+
+    # --- 2. Other Filters ---
+    if contract_no:
+        base_query = base_query.filter(contract_no=contract_no)
+    if stock_symbol:
+        base_query = base_query.filter(stock_symbol__icontains=stock_symbol)
+    if buyer:
+        base_query = base_query.filter(buyer=buyer)
+    if seller:
+        base_query = base_query.filter(seller=seller)
+
+    # --- Calculate totals (before pagination) ---
+    totals = base_query.aggregate(
+        total_quantity=Sum('quantity'),
+        total_amount=Sum('amount')
+    )
+
+    # --- NEW: Apply dynamic server-side sorting ---
+    sort_param = sort_by
+    if direction == 'desc':
+        sort_param = f"-{sort_by}"
+    
+    # We add '-id' as a secondary sort to ensure a stable,
+    # predictable order if two values are identical.
+    base_query = base_query.order_by(sort_param, '-id')
+
+    # --- 3. Pagination ---
+    paginator = Paginator(base_query, int(per_page_str), allow_empty_first_page=True)
+    page_obj = paginator.get_page(page)
+
+    context = {
+        'floorsheet_data': page_obj,
+        'title': title,
+
+        # Pagination context
+        'page_obj': page_obj,
+        'paginator': paginator,
+        'per_page': per_page_str,
+        'page': page,
+
+        # Filter values
+        'selected_date': selected_date_str,
+        'contract_no': contract_no,
+        'stock_symbol': stock_symbol,
+        'buyer': buyer,
+        'seller': seller,
+
+        # Totals
+        'total_quantity': totals['total_quantity'],
+        'total_amount': totals['total_amount'],
+        
+        # --- NEW: Pass sorting state to template ---
+        'current_sort': sort_by,
+        'current_dir': direction,
+    }
+    return render(request, 'nepse_data/floorsheet.html', context)
+
+
+def download_floorsheet_view(request):
+    # --- Get all the same filter parameters ---
+    selected_date_str = request.GET.get('selected_date')
+    contract_no = request.GET.get('contract_no', '').strip()
+    stock_symbol = request.GET.get('stock_symbol', '').strip()
+    buyer = request.GET.get('buyer', '').strip()
+    seller = request.GET.get('seller', '').strip()
+
+    base_query = FloorsheetRaw.objects.all()
+
+    # --- Apply Date Filter ---
+    query_date = None
+    if selected_date_str:
+        try:
+            query_date = datetime.date.fromisoformat(selected_date_str)
+        except ValueError:
+            query_date = None
+    else:
+        latest_date_result = FloorsheetRaw.objects.aggregate(max_date=Max('calculation_date'))
+        if latest_date_result['max_date']:
+            query_date = latest_date_result['max_date']
+
+    if query_date:
+        base_query = base_query.filter(calculation_date=query_date)
+
+    # --- Apply Other Filters ---
+    if contract_no:
+        base_query = base_query.filter(contract_no=contract_no)
+    if stock_symbol:
+        base_query = base_query.filter(stock_symbol__icontains=stock_symbol)
+    if buyer:
+        base_query = base_query.filter(buyer=buyer)
+    if seller:
+        base_query = base_query.filter(seller=seller)
+
+    floorsheet_data = base_query.order_by('-id').values_list(
+        'calculation_date', 'contract_no', 'stock_symbol', 'buyer', 
+        'seller', 'quantity', 'rate', 'amount', 'sector'
+    )
+
+    if not floorsheet_data.exists():
+        return HttpResponse("No floorsheet data to download for that query.", status=404)
+
+    response = HttpResponse(content_type='text/csv')
+    download_name = f"floorsheet_{query_date or 'all_dates'}.csv"
+    response['Content-Disposition'] = f'attachment; filename="{download_name}"'
+
+    writer = csv.writer(response)
+    writer.writerow([
+        'Date', 'Contract No', 'Symbol', 'Buyer', 
+        'Seller', 'Quantity', 'Rate', 'Amount', 'Sector'
+    ])
+
+    for row in floorsheet_data:
         writer.writerow(row)
 
     return response
-

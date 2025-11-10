@@ -35,20 +35,26 @@ class Indices(models.Model):
     id = models.AutoField(primary_key=True) 
     sn = models.BigIntegerField(blank=True, null=True)
     date = models.DateField(blank=True, null=True)
-    open = models.FloatField(blank=True, null=True)
-    high = models.FloatField(blank=True, null=True)
-    low = models.FloatField(blank=True, null=True)
-    close = models.FloatField(blank=True, null=True)
-    absolute_change = models.FloatField(blank=True, null=True)
+    
+    # --- THESE FIELDS ARE NOW FIXED (DecimalField) ---
+    open = models.DecimalField(max_digits=14, decimal_places=2, blank=True, null=True)
+    high = models.DecimalField(max_digits=14, decimal_places=2, blank=True, null=True)
+    low = models.DecimalField(max_digits=14, decimal_places=2, blank=True, null=True)
+    close = models.DecimalField(max_digits=14, decimal_places=2, blank=True, null=True)
+    absolute_change = models.DecimalField(max_digits=14, decimal_places=2, blank=True, null=True)
+    # --- END OF FIX ---
+
     percentage_change = models.TextField(blank=True, null=True)
-    number_52_weeks_high = models.FloatField(db_column='52_weeks_high', blank=True, null=True)
-    number_52_weeks_low = models.FloatField(db_column='52_weeks_low', blank=True, null=True)
-    turnover_values = models.FloatField(blank=True, null=True)
+    
+    # --- THESE FIELDS ARE ALSO FIXED (DecimalField) ---
+    number_52_weeks_high = models.DecimalField(max_digits=14, decimal_places=2, db_column='52_weeks_high', blank=True, null=True)
+    number_52_weeks_low = models.DecimalField(max_digits=14, decimal_places=2, db_column='52_weeks_low', blank=True, null=True)
+    turnover_values = models.DecimalField(max_digits=20, decimal_places=2, blank=True, null=True)
+    # --- END OF FIX ---
+    
     turnover_volume = models.BigIntegerField(blank=True, null=True)
     total_transaction = models.BigIntegerField(blank=True, null=True)
     sector = models.TextField(blank=True, null=True)
-    
-    # --- THIS IS THE NEW LINE ---
     created_at = models.DateTimeField(auto_now_add=True, null=True) 
 
     class Meta:
@@ -84,3 +90,27 @@ class Marcap(models.Model):
 
     def __str__(self):
         return f"Market Cap on {self.business_date}"
+    
+
+class FloorsheetRaw(models.Model):
+    # We need a primary key for Django, but the DB uses contract_no
+    # We will use the 'id' from your generated_models.py
+    id = models.BigIntegerField(primary_key=True)
+    contract_no = models.CharField(max_length=255, blank=True, null=True)
+    stock_symbol = models.CharField(max_length=255)
+    buyer = models.IntegerField(blank=True, null=True)
+    seller = models.IntegerField(blank=True, null=True)
+    quantity = models.IntegerField(blank=True, null=True)
+    rate = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
+    amount = models.DecimalField(max_digits=15, decimal_places=2, blank=True, null=True)
+    calculation_date = models.DateField(blank=True, null=True)
+    sector = models.CharField(max_length=255, blank=True, null=True)
+
+    class Meta:
+        managed = False  # <-- Tells Django to *not* create or change this table
+        db_table = 'floorsheet_raw'
+        verbose_name = 'Floorsheet (Raw)'
+        verbose_name_plural = 'Floorsheet (Raw)'
+
+    def __str__(self):
+        return f"{self.stock_symbol} ({self.contract_no})"
