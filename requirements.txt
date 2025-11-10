@@ -8,3 +8,4 @@ xlsxwriter
 numpy
 celery
 redis
+honcho

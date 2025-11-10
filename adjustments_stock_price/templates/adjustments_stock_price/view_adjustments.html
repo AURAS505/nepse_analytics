@@ -1,0 +1,112 @@
+{% extends 'base.html' %}
+
+{% block title %}Adjusted Prices for {{ symbol }}{% endblock %}
+
+{% block styles %}
+<style>
+    .table {
+        font-size: 0.85rem;
+    }
+    .table th {
+        position: sticky; 
+        top: 0; 
+        z-index: 10;
+        background-color: #f8f9fa;
+        vertical-align: middle;
+    }
+    .table-responsive {
+        max-height: 80vh;
+    }
+    .th-adj {
+        background-color: #ddeaff !important;
+        color: #0033a0 !important;
+    }
+    .col-adj {
+        background-color: #f0f5ff !important;
+        font-weight: 500;
+    }
+    .th-orig {
+        background-color: #f8f9fa;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid my-4">
+    <div class="col-lg-11 mx-auto">
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-white py-3">
+                <a href="{% url 'adjustments_stock_price:index' %}" class="text-primary text-decoration-none mb-2 d-block">&larr; Back to Tool</a>
+                <h4 class="mb-0">Price History for <span class="text-primary">{{ symbol }}</span></h4>
+                {% if company_name %}
+                <p class="mb-0 text-muted">{{ company_name }}</p>
+                {% endif %}
+            </div>
+            <div class="card-body">
+                {% if messages %}
+                    {% for message in messages %}
+                    <div class="alert alert-{{ message.tags }}">{{ message }}</div>
+                    {% endfor %}
+                {% endif %}
+
+                <div class="table-responsive">
+                    <table class="table table-bordered table-hover">
+                        <thead class="text-center">
+                            <tr>
+                                <th rowspan="2" class="th-orig">Date</th>
+                                <th colspan="5" class="fw-normal border-bottom th-orig">Original Prices</th>
+                                <th colspan="7" class="fw-normal border-bottom th-adj">Adjusted Prices</th>
+                                <th rowspan="2" class="th-orig" style="writing-mode: vertical-rl; transform: rotate(180deg);">Adj. Factor</th>
+                            </tr>
+                            <tr>
+                                <th class="text-end fw-normal th-orig">Open</th>
+                                <th class="text-end fw-normal th-orig">High</th>
+                                <th class="text-end fw-normal th-orig">Low</th>
+                                <th class="text-end fw-normal th-orig">Close</th>
+                                <th class="text-end fw-normal th-orig">ATP</th>
+                                
+                                <th class="text-end fw-bold th-adj">Adj. Open</th>
+                                <th class="text-end fw-bold th-adj">Adj. High</th>
+                                <th class="text-end fw-bold th-adj">Adj. Low</th>
+                                <th class="text-end fw-bold th-adj">Adj. Close</th>
+                                <th class="text-end fw-bold th-adj">Adj. ATP</th>
+                                <th class="text-end fw-bold th-adj">52W High</th>
+                                <th class="text-end fw-bold th-adj">52W Low</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% if prices %}
+                                {% for price in prices %}
+                                <tr>
+                                    <td>{{ price.business_date|date:"Y-m-d" }}</td>
+                                    
+                                    <td class="text-end">{{ price.open_price|floatformat:2|default_if_none:"N/A" }}</td>
+                                    <td class="text-end">{{ price.high_price|floatformat:2|default_if_none:"N/A" }}</td>
+                                    <td class="text-end">{{ price.low_price|floatformat:2|default_if_none:"N/A" }}</td>
+                                    <td class="text-end">{{ price.close_price|floatformat:2|default_if_none:"N/A" }}</td>
+                                    <td class="text-end">{{ price.average_traded_price|floatformat:2|default_if_none:"N/A" }}</td>
+                                    
+                                    <td class="text-end fw-medium col-adj">{{ price.open_price_adj|floatformat:2|default_if_none:"N/A" }}</td>
+                                    <td class="text-end fw-medium col-adj">{{ price.high_price_adj|floatformat:2|default_if_none:"N/A" }}</td>
+                                    <td class="text-end fw-medium col-adj">{{ price.low_price_adj|floatformat:2|default_if_none:"N/A" }}</td>
+                                    <td class="text-end fw-medium col-adj">{{ price.close_price_adj|floatformat:2|default_if_none:"N/A" }}</td>
+                                    <td class="text-end fw-medium col-adj">{{ price.average_traded_price_adj|floatformat:2|default_if_none:"N/A" }}</td>
+                                    <td class="text-end fw-medium col-adj">{{ price.fifty_two_week_high_adj|floatformat:2|default_if_none:"N/A" }}</td>
+                                    <td class="text-end fw-medium col-adj">{{ price.fifty_two_week_low_adj|floatformat:2|default_if_none:"N/A" }}</td>
+                                    
+                                    <td class="text-end text-muted" style="font-size: 0.8rem;">{{ price.adjustment_factor|floatformat:6|default_if_none:"N/A" }}</td>
+                                </tr>
+                                {% endfor %}
+                            {% else %}
+                                <tr>
+                                    <td colspan="14" class="px-6 py-4 text-center text-sm text-gray-500">No price data found for this symbol. Please ensure raw price data exists in the 'stock_prices' table.</td>
+                                </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

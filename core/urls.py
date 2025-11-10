@@ -7,3 +7,5 @@ urlpatterns = [
     # 'home_view' function from core/views.py
     path('', views.home_view, name='home'),
 ]
+
+

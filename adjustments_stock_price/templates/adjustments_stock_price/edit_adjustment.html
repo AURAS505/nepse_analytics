@@ -1,0 +1,70 @@
+{% extends 'base.html' %}
+    
+{% block title %}Edit Adjustment{% endblock %}
+
+{% block styles %}
+<style>
+    /* You can add specific page styles here if needed */
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container my-5">
+    <div class="row">
+        <div class="col-lg-8 mx-auto">
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-white py-3">
+                    <a href="{% url 'adjustments_stock_price:index' %}" class="text-primary text-decoration-none mb-2 d-block">&larr; Back to Tool</a>
+                    <h4 class="mb-0">Edit Adjustment for <span class="text-primary">{{ adjustment.symbol.script_ticker }}</span></h4>
+                </div>
+                <div class="card-body p-4">
+                    
+                    {% if messages %}
+                        {% for message in messages %}
+                        <div class="alert alert-{{ message.tags }}">{{ message }}</div>
+                        {% endfor %}
+                    {% endif %}
+
+                    <form method="POST" action="{% url 'adjustments_stock_price:edit' adjustment.id %}" class="row g-3">
+                        {% csrf_token %}
+                        <input type="hidden" name="symbol" value="{{ adjustment.symbol.script_ticker }}">
+                        
+                        <div class="col-md-6">
+                            <label for="symbol_display" class="form-label">Company Symbol:</label>
+                            <input type="text" id="symbol_display" value="{{ adjustment.symbol.script_ticker }}" readonly class="form-control" disabled>
+                            <p class="form-text text-muted">The symbol cannot be changed during an edit.</p>
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <label for="adjustment_type" class="form-label">Adjustment Type:</label>
+                            <select id="adjustment_type" name="adjustment_type" required class="form-select">
+                                <option value="bonus" {% if adjustment.adjustment_type == 'bonus' %}selected{% endif %}>Bonus Share</option>
+                                <option value="right" {% if adjustment.adjustment_type == 'right' %}selected{% endif %}>Right Share</option>
+                            </select>
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <label for="book_close_date" class="form-label">Book Closure Date:</label>
+                            <input type="date" id="book_close_date" name="book_close_date" value="{{ adjustment.book_close_date|date:'Y-m-d' }}" required class="form-control">
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <label for="adjustment_percent" id="percentage_label" class="form-label">Percentage (%):</label>
+                            <input type="number" step="0.01" id="adjustment_percent" name="adjustment_percent" value="{{ adjustment.adjustment_percent|floatformat:4 }}" min="0.01" required class="form-control">
+                        </div>
+
+                        <div class="col-12 text-end pt-3 border-top">
+                            <a href="{% url 'adjustments_stock_price:index' %}" class="btn btn-secondary">
+                                Cancel
+                            </a>
+                            <button type="submit" class="btn btn-primary">
+                                Save Changes & Recalculate
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

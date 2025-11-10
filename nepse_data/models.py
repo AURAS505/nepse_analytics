@@ -30,10 +30,11 @@ class StockPrices(models.Model):
     def __str__(self):
         return f"{self.symbol} on {self.business_date}"
 
+# --- THIS IS THE FIXED MODEL ---
 class Indices(models.Model):
-    # Django will add an 'id' field automatically
+    id = models.AutoField(primary_key=True) 
     sn = models.BigIntegerField(blank=True, null=True)
-    date = models.DateTimeField(blank=True, null=True)
+    date = models.DateField(blank=True, null=True)
     open = models.FloatField(blank=True, null=True)
     high = models.FloatField(blank=True, null=True)
     low = models.FloatField(blank=True, null=True)
@@ -46,6 +47,9 @@ class Indices(models.Model):
     turnover_volume = models.BigIntegerField(blank=True, null=True)
     total_transaction = models.BigIntegerField(blank=True, null=True)
     sector = models.TextField(blank=True, null=True)
+    
+    # --- THIS IS THE NEW LINE ---
+    created_at = models.DateTimeField(auto_now_add=True, null=True) 
 
     class Meta:
         db_table = 'indices'
@@ -53,16 +57,25 @@ class Indices(models.Model):
 
     def __str__(self):
         return f"{self.sector} on {self.date}"
+# --- END OF FIX ---
 
 class Marcap(models.Model):
-    # Django will add an 'id' field automatically
+    id = models.AutoField(primary_key=True)
     sn = models.IntegerField(blank=True, null=True)
     business_date = models.DateField(unique=True)
     market_capitalization = models.DecimalField(max_digits=20, decimal_places=2, blank=True, null=True)
     sensitive_market_capitalization = models.DecimalField(max_digits=20, decimal_places=2, blank=True, null=True)
     float_market_capitalization = models.DecimalField(max_digits=20, decimal_places=2, blank=True, null=True)
     sensitive_float_market_capitalization = models.DecimalField(max_digits=20, decimal_places=2, blank=True, null=True)
-    created_at = models.DateTimeField(blank=True, null=True)
+
+    # --- NEW COLUMNS ADDED ---
+    total_turnover = models.DecimalField(max_digits=20, decimal_places=2, blank=True, null=True)
+    total_traded_shares = models.BigIntegerField(blank=True, null=True)
+    total_transactions = models.BigIntegerField(blank=True, null=True)
+    total_scrips_traded = models.BigIntegerField(blank=True, null=True)
+    # --- END OF NEW COLUMNS ---
+
+    created_at = models.DateTimeField(auto_now_add=True, null=True)
 
     class Meta:
         db_table = 'marcap'

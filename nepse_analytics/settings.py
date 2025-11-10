@@ -146,3 +146,11 @@ STATICFILES_DIRS = [os.path.join(BASE_DIR, 'static')]
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+
+# --- CELERY SETTINGS ---
+# Use Redis as the message broker
+CELERY_BROKER_URL = 'redis://127.0.0.1:6379/0'
+
+# Use Redis as the result backend
+CELERY_RESULT_BACKEND = 'redis://127.0.0.1:6379/0'

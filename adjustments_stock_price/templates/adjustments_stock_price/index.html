@@ -1,0 +1,401 @@
+{% extends 'base.html' %}
+
+{% block title %}Price Adjustment Tool{% endblock %}
+
+{% block styles %}
+<style>
+    /* Custom styles for the adjustment tool */
+    .card-header {
+        background-color: #f6f9fc !important;
+        border-bottom: 1px solid #e1e8f0;
+    }
+
+    .table {
+        font-size: 0.9rem;
+    }
+
+    .table th {
+        font-weight: 600;
+        color: #333;
+    }
+
+    .table-hover>tbody>tr:hover {
+        background-color: #eef5ff !important;
+    }
+
+    .action-buttons .btn {
+        margin-right: 5px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+    <div class="row">
+        <div class="col-lg-10 mx-auto">
+
+            <h2 class="mb-4">Stock Price Adjustment Tool</h2>
+
+            {% if messages %}
+                {% for message in messages %}
+                <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                    {{ message }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+                {% endfor %}
+            {% endif %}
+
+            <div class="card shadow-sm border-0 mb-4">
+                <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Add New Adjustment</h5>
+                </div>
+                <div class="card-body">
+                    <form id="addAdjustmentForm" action="{% url 'adjustments_stock_price:index' %}" method="POST" class="row g-3">
+                        {% csrf_token %}
+                        <div class="col-md-3">
+                            <label for="symbol" class="form-label">Symbol</label>
+                            <input type="text" class="form-control" id="symbol" name="symbol" required onkeyup="this.value = this.value.toUpperCase(); fetchCompanyName(this.value);">
+                            <small id="companyNameDisplay" class="form-text text-muted"></small>
+                        </div>
+                        <div class="col-md-3">
+                            <label for="adjustment_type" class="form-label">Adjustment Type</label>
+                            <select class="form-select" id="adjustment_type" name="adjustment_type" required>
+                                <option value="bonus">Bonus Share</option>
+                                <option value="right">Right Share</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label for="book_close_date" class="form-label">Book Close Date</label>
+                            <input type="date" class="form-control" id="book_close_date" name="book_close_date" required>
+                        </div>
+                        <div class="col-md-3">
+                            <label for="adjustment_percent" class="form-label">Adjustment Percent (%)</label>
+                            <input type="number" step="0.0001" class="form-control" id="adjustment_percent" name="adjustment_percent" required>
+                        </div>
+                        <div class="col-12 text-end">
+                            <button type="submit" class="btn btn-primary">Add & Recalculate</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <div class="card shadow-sm border-0 mb-4">
+                <div class="card-header bg-white">
+                    <h5 class="mb-0">Run Full Price Recalculation</h5>
+                </div>
+                <div class="card-body p-4">
+                    <p class="card-text">
+                        Click this button to run the optimized recalculation process. This will:
+                        <br>1. Run a full adjustment for all symbols <strong>with</strong> corporate actions.
+                        <br>2. Run a fast copy for all symbols <strong>without</strong> corporate actions.
+                    </p>
+                    <div class="text-end">
+                        <button id="startRecalcButton" class="btn btn-warning btn-lg">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-arrow-clockwise" viewBox="0 0 16 16">
+                                <path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2z"/>
+                                <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466"/>
+                            </svg>
+                            Start Full Recalculation
+                        </button>
+                    </div>
+
+                    <div id="progressSection" class="mt-4" style="display: none;">
+                        <div class="progress" role="progressbar" aria-label="Recalculation progress" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" style="height: 25px;">
+                            <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated bg-warning text-dark" style="width: 0%">
+                                <span id="progressText" class="fw-bold">Starting...</span>
+                            </div>
+                        </div>
+                        <div class="text-center mt-2">
+                            <small id="progressMessage" class="form-text text-muted">Initializing job...</small>
+                        </div>
+                        <div id="jobCompleteControls" class="text-center mt-2" style="display: none;">
+                            <button id="clearJobButton" class="btn btn-sm btn-outline-secondary">Clear</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-white d-flex flex-wrap justify-content-between align-items-center">
+
+                    <div class="d-flex align-items-center mb-2 mb-md-0">
+                        <h5 class="mb-0 me-3">Adjustment History</h5>
+
+                        <form method="GET" action="{% url 'adjustments_stock_price:index' %}" class="d-flex align-items-center">
+                            <label for="per_page" class="form-label me-2 mb-0" style="white-space: nowrap;">Rows:</label>
+                            <select name="per_page" id="per_page" class="form-select form-select-sm" onchange="this.form.submit()">
+                                <option value="10" {% if per_page == '10' %}selected{% endif %}>10</option>
+                                <option value="20" {% if per_page == '20' %}selected{% endif %}>20</option>
+                                <option value="50" {% if per_page == '50' %}selected{% endif %}>50</option>
+                                <option value="200" {% if per_page == '200' %}selected{% endif %}>200</option>
+                                <option value="All" {% if per_page == 'All' %}selected{% endif %}>All</option>
+                            </select>
+                        </form>
+                    </div>
+
+                    <div class="d-flex">
+                        <form action="{% url 'adjustments_stock_price:bulk_upload' %}" method="POST" enctype="multipart/form-data" class="d-flex">
+                            {% csrf_token %}
+                            <input type="file" name="file" class="form-control form-control-sm" accept=".csv, .xlsx" required>
+                            <button type="submit" class="btn btn-secondary btn-sm ms-2" onclick="return confirm('This will upload and process adjustments from the file. Continue?');">Upload</button>
+                        </form>
+                        <a href="{% url 'adjustments_stock_price:download_sample_csv' %}" class="btn btn-info btn-sm ms-2">Sample CSV</a>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Symbol</th>
+                                    <th>Type</th>
+                                    <th>Book Close Date</th>
+                                    <th>Adj. Percent</th>
+                                    <th>Par Value</th>
+                                    <th>Adj. Factor</th>
+                                    <th>Records Adjusted</th>
+                                    <th>Date Added</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for adj in adjustments %}
+                                <tr>
+                                    <td><strong>{{ adj.symbol.script_ticker }}</strong></td>
+                                    <td>{{ adj.adjustment_type|capfirst }}</td>
+                                    <td>{{ adj.book_close_date|date:"Y-m-d" }}</td>
+                                    <td>{{ adj.adjustment_percent|floatformat:4 }}%</td>
+                                    <td>{{ adj.par_value|floatformat:2 }}</td>
+                                    <td>{{ adj.adjustment_factor|floatformat:10|default_if_none:"N/A" }}</td>
+                                    <td>{{ adj.records_adjusted|default_if_none:"N/A" }}</td>
+                                    <td>{{ adj.adjustment_date|date:"Y-m-d H:i" }}</td>
+                                    <td class="action-buttons">
+                                        <a href="{% url 'adjustments_stock_price:view' adj.symbol.script_ticker %}" class="btn btn-outline-primary btn-sm" title="View Prices">
+                                            <i class="bi bi-eye-fill"></i> View
+                                        </a>
+                                        <a href="{% url 'adjustments_stock_price:edit' adj.id %}" class="btn btn-outline-secondary btn-sm" title="Edit">
+                                            <i class="bi bi-pencil-fill"></i> Edit
+                                        </a>
+                                        <form action="{% url 'adjustments_stock_price:delete' adj.id %}" method="POST" style="display:inline;" onsubmit="return confirm('Are you sure you want to delete this adjustment and recalculate?');">
+                                            {% csrf_token %}
+                                            <button type="submit" class="btn btn-outline-danger btn-sm" title="Delete">
+                                                <i class="bi bi-trash-fill"></i> Delete
+                                            </button>
+                                        </form>
+                                    </td>
+                                </tr>
+                                {% empty %}
+                                <tr>
+                                    <td colspan="9" class="text-center">No adjustment history found.</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    {% if page_obj %}
+                        <nav aria-label="Page navigation" class="mt-3">
+                            <div class="d-flex justify-content-between align-items-center">
+                                
+                                <div class="text-muted">
+                                    Showing <strong>{{ page_obj.start_index }}</strong>-<strong>{{ page_obj.end_index }}</strong> of <strong>{{ paginator.count }}</strong> records
+                                </div>
+
+                                <ul class="pagination mb-0">
+                                    <li class="page-item {% if not page_obj.has_previous %}disabled{% endif %}">
+                                        <a class="page-link" href="?page=1&per_page={{ per_page }}">&laquo;</a>
+                                    </li>
+                                    
+                                    <li class="page-item {% if not page_obj.has_previous %}disabled{% endif %}">
+                                        <a class="page-link" href="{% if page_obj.has_previous %}?page={{ page_obj.previous_page_number }}&per_page={{ per_page }}{% else %}#{% endif %}">Prev</a>
+                                    </li>
+                                    <li class="page-item disabled">
+                                        <span class="page-link">Page {{ page_obj.number }} of {{ paginator.num_pages }}</span>
+                                    </li>
+
+                                    <li class="page-item {% if not page_obj.has_next %}disabled{% endif %}">
+                                        <a class="page-link" href="{% if page_obj.has_next %}?page={{ page_obj.next_page_number }}&per_page={{ per_page }}{% else %}#{% endif %}">Next</a>
+                                    </li>
+                                    <li class="page-item {% if not page_obj.has_next %}disabled{% endif %}">
+                                        <a class="page-link" href="?page={{ paginator.num_pages }}&per_page={{ per_page }}">&raquo;</a>
+                                    </li>
+                                </ul>
+                            </div>
+                        </nav>
+                        {% elif per_page == 'All' and adjustments %}
+                        <div class="text-muted mt-3">
+                            Showing all <strong>{{ adjustments.count }}</strong> records
+                        </div>
+                        {% endif %}
+
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script id="js-urls" type="application/json">
+{
+    "getCompanyName": "/adjustments/api/company/",
+    "startRecalc": "{% url 'adjustments_stock_price:start_recalc' %}",
+    "recalcStatus": "/adjustments/recalc-status/",
+    "clearJob": "/adjustments/clear-job/"
+}
+</script>
+
+<script>
+    function fetchCompanyName(symbol) {
+        // (This function is unchanged)
+        const display = document.getElementById('companyNameDisplay');
+        if (symbol.length < 2) { display.textContent = ''; return; }
+        const URLS = JSON.parse(document.getElementById('js-urls').textContent);
+        fetch(`${URLS.getCompanyName}${symbol}/`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.company_name && data.company_name !== "Company not found" && data.company_name !== "Database error") {
+                    display.textContent = data.company_name;
+                    display.className = 'form-text text-success';
+                } else {
+                    display.textContent = data.company_name || '...';
+                    display.className = 'form-text text-danger';
+                }
+            }).catch(error => {
+                console.error('Error fetching company name:', error);
+                display.textContent = 'Error fetching name.';
+                display.className = 'form-text text-danger';
+            });
+    }
+</script>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const URLS = JSON.parse(document.getElementById('js-urls').textContent);
+    const startButton = document.getElementById('startRecalcButton');
+    const progressSection = document.getElementById('progressSection');
+    const progressBar = document.getElementById('progressBar');
+    const progressText = document.getElementById('progressText');
+    const progressMessage = document.getElementById('progressMessage');
+    const jobCompleteControls = document.getElementById('jobCompleteControls');
+    const clearJobButton = document.getElementById('clearJobButton');
+
+    let currentJobId = null;
+    let pollingInterval = null;
+
+    // --- 1. Start Button (unchanged) ---
+    startButton.addEventListener('click', function() {
+        startButton.disabled = true;
+        startButton.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Starting...';
+        progressSection.style.display = 'block';
+        jobCompleteControls.style.display = 'none';
+        setProgressBar(0, 'Starting...', 'Initializing job...', 'bg-warning', true);
+        const csrfToken = document.querySelector('input[name="csrfmiddlewaretoken"]').value;
+        fetch(URLS.startRecalc, {
+            method: 'POST',
+            headers: { 'X-CSRFToken': csrfToken }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'started') {
+                currentJobId = data.job_id;
+                startButton.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Running...';
+                startPolling(currentJobId);
+            } else { throw new Error(data.message || 'Failed to start job.'); }
+        })
+        .catch(error => {
+            console.error('Error starting job:', error);
+            progressMessage.innerText = `Error: ${error.message}`;
+            setProgressBar(100, 'Error', 'Error starting job.', 'bg-danger', false);
+            startButton.disabled = false;
+            startButton.innerHTML = 'Start Full Recalculation';
+        });
+    });
+
+    // --- 2. Poll for Status (THIS IS THE UPDATED LOGIC) ---
+    function startPolling(jobId) {
+        pollingInterval = setInterval(() => {
+            fetch(`${URLS.recalcStatus}${jobId}/`)
+            .then(response => response.json())
+            .then(status => {
+                if (!status) return;
+
+                let percent = 0;
+                if (status.total > 0) {
+                    percent = (status.progress / status.total) * 100;
+                }
+                
+                // This answers your request:
+                // It shows the detailed message from the task, e.g., "Adjusting NABIL..."
+                progressMessage.innerText = status.message || '...';
+
+                if (status.status === 'running' || status.status === 'PROGRESS') {
+                    // This answers your request:
+                    // It shows the % in the bar
+                    setProgressBar(percent, `${Math.round(percent)}%`, status.message, 'bg-warning', true);
+                } 
+                else if (status.status === 'complete' || status.status === 'SUCCESS') {
+                    // This answers your request:
+                    // It now shows the "Complete!" message
+                    setProgressBar(100, 'Complete!', status.message, 'bg-success', false);
+                    finishPolling(jobId, false);
+                }
+                else if (status.status === 'error' || status.status === 'FAILURE') {
+                    // It now shows an error
+                    setProgressBar(100, 'Error!', status.message, 'bg-danger', false);
+                    finishPolling(jobId, true);
+                }
+                else if (status.status === 'pending') {
+                    setProgressBar(0, 'Pending...', 'Job is queued...', 'bg-warning', true);
+                }
+            })
+            .catch(error => {
+                console.error('Polling error:', error);
+                setProgressBar(100, 'Error!', 'Connection lost.', 'bg-danger', false);
+                finishPolling(null, true);
+            });
+        }, 1500);
+    }
+    
+    // --- (setProgressBar, finishPolling, clearJobButton are unchanged) ---
+    function setProgressBar(percent, text, message, barClass, isAnimated) {
+        progressBar.style.width = percent + '%';
+        progressBar.setAttribute('aria-valuenow', percent);
+        progressText.innerText = text;
+        progressMessage.innerText = message;
+        progressBar.classList.remove('bg-warning', 'bg-success', 'bg-danger');
+        progressBar.classList.add(barClass);
+        if (isAnimated) {
+            progressBar.classList.add('progress-bar-animated', 'progress-bar-striped');
+        } else {
+            progressBar.classList.remove('progress-bar-animated', 'progress-bar-striped');
+        }
+    }
+    
+    function finishPolling(jobId, isError) {
+        if (pollingInterval) {
+            clearInterval(pollingInterval);
+            pollingInterval = null;
+        }
+        startButton.disabled = false;
+        startButton.innerHTML = 'Start Full Recalculation';
+        jobCompleteControls.style.display = 'block';
+    }
+    
+    clearJobButton.addEventListener('click', function() {
+        progressSection.style.display = 'none';
+        jobCompleteControls.style.display = 'none';
+        setProgressBar(0, '', '', 'bg-warning', true);
+        if (currentJobId) {
+            const csrfToken = document.querySelector('input[name="csrfmiddlewaretoken"]').value;
+            fetch(`${URLS.clearJob}${currentJobId}/`, { 
+                method: 'POST',
+                headers: { 'X-CSRFToken': csrfToken }
+            });
+            currentJobId = null;
+        }
+    });
+});
+</script>
+{% endblock %}
