@@ -42,7 +42,10 @@
                     <div class="card-body d-flex flex-column">
                         <h5 class="card-title text-info">Floorsheet Explorer</h5>
                         <p class="card-text">Deep dive into NEPSE floorsheet data, turnover, and active stocks.</p>
-                        <a href="#" class="btn btn-outline-info mt-auto disabled">Explore Trades</a>
+                        
+                        {# This now links to your new settlement_report page #}
+                        <a href="{% url 'floorsheet_analysis:settlement_report' %}" class="btn btn-outline-info mt-auto">Explore Trades</a>
+                    
                     </div>
                 </div>
             </div>

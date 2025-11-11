@@ -1,0 +1,452 @@
+{% extends 'base.html' %}
+{% load humanize %}
+
+{% block title %}Settlement Report - Hathway Analytics Suite{% endblock %}
+
+{# Add flatpickr CSS and original page styles to the head #}
+{% block styles %}
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <style>
+        body { background-color: #f8f9fa; }
+        .table-container { max-height: 70vh; overflow-y: auto; }
+        .table th { position: sticky; top: 0; background-color: #f8f9fa; z-index: 10; }
+        .sortable-th { cursor: pointer; position: relative; user-select: none; }
+        .sortable-th .sort-icon::after { content: ' \2195'; opacity: 0.3; }
+        .sortable-th.sorted-asc .sort-icon::after { content: ' \2191'; opacity: 1; }
+        .sortable-th.sorted-desc .sort-icon::after { content: ' \2193'; opacity: 1; }
+        .nav-custom .nav-link { padding: 0.5rem 1rem; border-radius: 0.375rem; font-size: 0.875rem; font-weight: 500; color: #4B5563; transition: background-color 0.2s; }
+        .nav-custom .nav-link:hover { background-color: #F3F4F6; }
+        .nav-custom .nav-link.active { color: #0d6efd; background-color: #e7f1ff; }
+        .modal-body-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; height: calc(90vh - 120px); }
+        .modal-table-wrapper { display: flex; flex-direction: column; min-height: 0; }
+        .modal-table-container { flex: 1; overflow-y: auto; border: 1px solid #dee2e6; border-radius: 8px; }
+        .font-numeric { font-variant-numeric: tabular-nums; }
+        .text-green { color: #198754; }
+        .text-red { color: #dc3545; }
+        .text-blue { color: #0d6efd; }
+        .clickable-row { cursor: pointer; transition: background-color 0.15s; }
+        .clickable-row:hover { background-color: rgba(13, 110, 253, 0.1) !important; }
+        @media (max-width: 768px) { .modal-body-grid { grid-template-columns: 1fr; height: auto; } }
+    </style>
+{% endblock styles %}
+
+
+{% block content %}
+    <div class="container-fluid mt-4">
+        <header class="mb-4">
+            <h1 class="display-5 fw-bold text-center position-relative">
+                Broker Settlement Report
+            </h1>
+        </header>
+
+        {# Nav bar with other links disabled as requested #}
+        <nav class="nav nav-pills flex-column flex-sm-row nav-custom justify-content-center mb-4 bg-white p-2 rounded-3 shadow-sm">
+            <a class="flex-sm-fill text-sm-center nav-link active" aria-current="page" href="{% url 'floorsheet_analysis:settlement_report' %}">Settlement Report</a>
+            <a class="flex-sm-fill text-sm-center nav-link" href="#">Live Floorsheet</a>
+            <a class="flex-sm-fill text-sm-center nav-link" href="{% url 'floorsheet_analysis:company_trades_report' %}">Company Trades</a>
+            <a class="flex-sm-fill text-sm-center nav-link" href="{% url 'floorsheet_analysis:broker_trades_report' %}">Broker Trades</a>
+            <a class="flex-sm-fill text-sm-center nav-link" href="{% url 'floorsheet_analysis:stock_holding_history_report' %}">Daily Holdings</a>
+            <a class="flex-sm-fill text-sm-center nav-link" href="#">Accum/Dist</a>
+        </nav>
+
+        <div class="row">
+            <div class="col-xl-11 mx-auto">
+                <div class="card card-body mb-4 py-3">
+                    <form method="POST" action="{% url 'floorsheet_analysis:settlement_report' %}" class="row g-2 align-items-end">
+                        {% csrf_token %}
+                        <div class="col-lg-2 col-md-4">
+                            <label for="date_range_type" class="form-label small mb-1">Date Range</label>
+                            <select id="date_range_type" name="date_range_type" class="form-select form-select-sm">
+                                <option value="current_day" {% if selected_date_range_type == 'current_day' %}selected{% endif %}>Current Day</option>
+                                <option value="2_days" {% if selected_date_range_type == '2_days' %}selected{% endif %}>Last 2 Days</option>
+                                <option value="3_days" {% if selected_date_range_type == '3_days' %}selected{% endif %}>Last 3 Days</option>
+                                <option value="4_days" {% if selected_date_range_type == '4_days' %}selected{% endif %}>Last 4 Days</option>
+                                <option value="5_days" {% if selected_date_range_type == '5_days' %}selected{% endif %}>Last 5 Days</option>
+                                <option value="1_week" {% if selected_date_range_type == '1_week' %}selected{% endif %}>Last Week</option>
+                                <option value="fortnight" {% if selected_date_range_type == 'fortnight' %}selected{% endif %}>Fortnight</option>
+                                <option value="monthly" {% if selected_date_range_type == 'monthly' %}selected{% endif %}>Monthly</option>
+                                <option value="custom" {% if selected_date_range_type == 'custom' %}selected{% endif %}>Custom</option>
+                            </select>
+                        </div>
+                        <div class="col-lg-2 col-md-4"><label for="start_date" class="form-label small mb-1">Start Date</label><input type="text" id="start_date" name="start_date" value="{{ start_date }}" class="form-control form-control-sm"></div>
+                        <div class="col-lg-2 col-md-4"><label for="end_date" class="form-label small mb-1">End Date</label><input type="text" id="end_date" name="end_date" value="{{ end_date }}" class="form-control form-control-sm"></div>
+                        <div class="col-lg-4 col-md-8"><label for="search_broker_no" class="form-label small mb-1">Broker No.</label><input type="text" id="search_broker_no" name="search_broker_no" placeholder="Search by Broker No." value="{{ search_broker_no|default:'' }}" class="form-control form-control-sm"></div>
+                        <div class="col-lg-2 col-md-4"><button type="submit" class="btn btn-primary btn-sm w-100">Analyze</button></div>
+                    </form>
+                </div>
+            </div>
+        </div>
+        
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span id="reportHeader">Broker Settlement Report ({{ start_date }} to {{ end_date }})</span>
+                        {% if is_daywise_view and settlement_data %}
+                        <button class="btn btn-outline-primary btn-sm" id="viewChartBtn">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-bar-chart-line-fill" viewBox="0 0 16 16"><path d="M11 2a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v12h.5a.5.5 0 0 1 0 1H.5a.5.5 0 0 1 0-1H1v-3a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v3h1V7a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v7h1V2z"/></svg>
+                            View Chart
+                        </button>
+                        {% endif %}
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-container">
+                            <table id="settlementTable" class="table table-striped table-hover mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>S.N.</th>
+                                        {% if is_daywise_view %}
+                                        {# In day-wise view, Date is not sortable #}
+                                        <th>Date</th>
+                                        {% endif %}
+                                        
+                                        {# --- All columns are now sortable --- #}
+                                        <th class="sortable-th" data-type="number">Broker No.<span class="sort-icon"></span></th>
+                                        <th class="sortable-th" data-type="string">Broker Name<span class="sort-icon"></span></th>
+                                        <th class="text-end sortable-th" data-type="number">Buy Amt<span class="sort-icon"></span></th>
+                                        <th class="text-end sortable-th" data-type="number">Sell Amt<span class="sort-icon"></span></th>
+                                        <th class="text-end sortable-th" data-type="number">Total Amt<span class="sort-icon"></span></th>
+                                        <th class="text-end sortable-th" data-type="number">Difference<span class="sort-icon"></span></th>
+                                        <th class="text-end sortable-th" data-type="number">Matching Amt<span class="sort-icon"></span></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                {% if settlement_data %}
+                                    {% if is_daywise_view %}
+                                        {% for row in settlement_data %}
+                                        <tr class="clickable-row" data-broker-no="{{ row.broker_no }}" data-broker-name="{{ row.broker_name }}">
+                                            <td class="font-numeric">{{ forloop.counter }}</td>
+                                            <td>{{ row.calculation_date|date:"Y-m-d" }}</td>
+                                            <td class="font-numeric" title="{{ row.broker_name }}">{{ row.broker_no }}</td>
+                                            <td>{{ row.broker_name }}</td>
+                                            <td class="font-numeric text-green text-end">{{ row.buy_amount|floatformat:2|intcomma }}</td>
+                                            <td class="font-numeric text-red text-end">{{ row.sell_amount|floatformat:2|intcomma }}</td>
+                                            <td class="font-numeric fw-bold text-end">{{ row.total_amount|floatformat:2|intcomma }}</td>
+                                            <td class="font-numeric fw-bold text-end {% if row.difference >= 0 %}text-green{% else %}text-red{% endif %}">{{ row.difference|floatformat:2|intcomma }}</td>
+                                            <td class="font-numeric text-blue text-end">{{ row.matching_amount|floatformat:2|intcomma }}</td>
+                                        </tr>
+                                        {% endfor %}
+                                    {% else %}
+                                        {% for row in settlement_data %}
+                                        <tr class="clickable-row" data-broker-no="{{ row.broker_no }}" data-broker-name="{{ row.broker_name }}">
+                                            <td class="font-numeric">{{ forloop.counter }}</td>
+                                            <td class="font-numeric" title="{{ row.broker_name }}">{{ row.broker_no }}</td>
+                                            <td>{{ row.broker_name }}</td>
+                                            <td class="font-numeric text-green text-end">{{ row.buy_amount|floatformat:2|intcomma }}</td>
+                                            <td class="font-numeric text-red text-end">{{ row.sell_amount|floatformat:2|intcomma }}</td>
+                                            <td class="font-numeric fw-bold text-end">{{ row.total_amount|floatformat:2|intcomma }}</td>
+                                            <td class="font-numeric fw-bold text-end {% if row.difference >= 0 %}text-green{% else %}text-red{% endif %}">{{ row.difference|floatformat:2|intcomma }}</td>
+                                            <td class="font-numeric text-blue text-end">{{ row.matching_amount|floatformat:2|intcomma }}</td>
+                                        </tr>
+                                        {% endfor %}
+                                    {% endif %}
+                                {% else %}
+                                    <tr>
+                                        <td colspan="{% if is_daywise_view %}9{% else %}8{% endif %}" class="text-center py-4 text-muted">No data available.</td>
+                                    </tr>
+                                {% endif %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <footer class="text-center mt-4 text-muted small"><p>Data sourced from NEPSE. Analytics by Hathway.</p></footer>
+    </div>
+
+    {# --- MODALS FOR POP-UP DATA --- #}
+    <div id="sectorDetailModal" class="modal fade" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-xl"><div class="modal-content large-modal"><div class="modal-header"><h5 class="modal-title" id="sectorModalTitle">Broker Sector Details</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="modal-body-grid"><div class="modal-table-wrapper"><h3 class="text-green mb-3">Top Sector Buys</h3><div class="modal-table-container"><table class="table table-sm table-striped"><thead><tr><th>Sector</th><th class="text-end">Amount (Rs.)</th><th class="text-end">% of Broker</th><th class="text-end">% of Market</th></tr></thead><tbody id="sectorBuyDetailBody"></tbody></table></div></div><div class="modal-table-wrapper"><h3 class="text-red mb-3">Top Sector Sells</h3><div class="modal-table-container"><table class="table table-sm table-striped"><thead><tr><th>Sector</th><th class="text-end">Amount (Rs.)</th><th class="text-end">% of Broker</th><th class="text-end">% of Market</th></tr></thead><tbody id="sectorSellDetailBody"></tbody></table></div></div></div></div></div></div></div>
+    <div id="scriptDetailModal" class="modal fade" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-xl"><div class="modal-content large-modal"><div class="modal-header"><h5 class="modal-title" id="scriptModalTitle">Script Details</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="modal-body-grid"><div class="modal-table-wrapper"><h3 class="text-green mb-3">Top Script Buys</h3><div class="modal-table-container"><table class="table table-sm table-striped"><thead><tr><th>Script</th><th class="text-end">Amount (Rs.)</th><th class="text-end">% of Sector</th><th class="text-end">% of Broker</th></tr></thead><tbody id="scriptBuyDetailBody"></tbody></table></div></div><div class="modal-table-wrapper"><h3 class="text-red mb-3">Top Script Sells</h3><div class="modal-table-container"><table class="table table-sm table-striped"><thead><tr><th>Script</th><th class="text-end">Amount (Rs.)</th><th class="text-end">% of Sector</th><th class="text-end">% of Broker</th></tr></thead><tbody id="scriptSellDetailBody"></tbody></table></div></div></div></div></div></div></div>
+    <div class="modal fade" id="chartModal" tabindex="-1">
+        <div class="modal-dialog modal-fullscreen">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Day-wise Analysis for Broker {{ search_broker_no }}</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <canvas id="daywiseChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock content %}
+
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // --- MODAL SETUP ---
+    const sectorModal = new bootstrap.Modal(document.getElementById('sectorDetailModal'));
+    const scriptModal = new bootstrap.Modal(document.getElementById('scriptDetailModal'));
+    const chartModal = new bootstrap.Modal(document.getElementById('chartModal'));
+    let daywiseChart;
+
+    const sectorDetailsURL = "{% url 'floorsheet_analysis:broker_sector_details' %}";
+    const scriptDetailsURL = "{% url 'floorsheet_analysis:broker_script_details' %}";
+
+    // --- DATE PICKERS (This logic is correct) ---
+    const rangeTypeSelect = document.getElementById('date_range_type');
+    const startDateInput = document.getElementById('start_date');
+    const endDateInput = document.getElementById('end_date');
+
+    let availableDates = [];
+    try {
+        availableDates = {{ available_dates_db|safe }} || [];
+    } catch (err) {
+        console.warn("Invalid available_dates_db JSON:", err);
+        availableDates = [];
+    }
+
+    flatpickr("#start_date", {
+        dateFormat: "Y-m-d",
+        enable: availableDates.length ? availableDates : undefined,
+        allowInput: true
+    });
+    flatpickr("#end_date", {
+        dateFormat: "Y-m-d",
+        enable: availableDates.length ? availableDates : undefined,
+        allowInput: true
+    });
+
+    function toggleCustomDateRange() {
+        const isCustom = rangeTypeSelect.value === 'custom';
+        startDateInput.disabled = !isCustom;
+        endDateInput.disabled = !isCustom;
+    }
+    rangeTypeSelect.addEventListener('change', toggleCustomDateRange);
+    toggleCustomDateRange(); // Run on page load
+
+    // --- SORTING (This logic is correct) ---
+    const table = document.getElementById('settlementTable');
+    if (table) {
+        const headers = table.querySelectorAll('th.sortable-th');
+        headers.forEach(header => {
+            header.addEventListener('click', (e) => {
+                e.stopPropagation(); 
+                sortTable(header);
+            });
+        });
+    }
+
+    function sortTable(header) {
+        const table = header.closest('table');
+        const tbody = table.querySelector('tbody');
+        if (!tbody) return;
+
+        const headers = Array.from(header.parentNode.children);
+        const columnIndex = headers.indexOf(header);
+        const columnType = header.dataset.type || 'string';
+        const isAscending = header.classList.contains('sorted-asc');
+        const sortDirection = isAscending ? -1 : 1;
+
+        table.querySelectorAll('th.sortable-th')
+            .forEach(h => h.classList.remove('sorted-asc', 'sorted-desc'));
+
+        header.classList.toggle('sorted-asc', !isAscending);
+        header.classList.toggle('sorted-desc', isAscending);
+
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+        rows.sort((a, b) => {
+            const aText = a.cells[columnIndex]?.textContent.trim().replace(/,/g, '') || '';
+            const bText = b.cells[columnIndex]?.textContent.trim().replace(/,/g, '') || '';
+            if (columnType === 'number') {
+                return (parseFloat(aText) - parseFloat(bText)) * sortDirection;
+            } else {
+                return aText.localeCompare(bText) * sortDirection;
+            }
+        });
+
+        rows.forEach(row => tbody.appendChild(row));
+    }
+
+    // --- ROW CLICK (Show Sector Details) ---
+    const tbody = table?.querySelector('tbody');
+    if (tbody) {
+        tbody.addEventListener('click', (e) => {
+            const row = e.target.closest('.clickable-row');
+            if (row && row.dataset.brokerNo) showSectorDetails(row);
+        });
+    }
+
+    // --- CHART BUTTON ---
+    const viewChartBtn = document.getElementById('viewChartBtn');
+    if (viewChartBtn) {
+        viewChartBtn.addEventListener('click', () => {
+            renderChart();
+            chartModal.show();
+        });
+    }
+
+    // --- FUNCTIONS ---
+    let currentBrokerContext = {};
+    
+    // --- CORRECTED MODAL FUNCTION ---
+    function showSectorDetails(rowElement) {
+        const brokerNo = rowElement.dataset.brokerNo;
+        const brokerName = rowElement.dataset.brokerName;
+        const startDate = startDateInput.value;
+        const endDate = endDateInput.value;
+        currentBrokerContext = { brokerNo, brokerName, startDate, endDate };
+        document.getElementById('sectorModalTitle').textContent =
+            `Broker #${brokerNo} (${brokerName}) - Sector Details`;
+
+        const loadingHtml = `<tr><td colspan="4" class="text-center py-3">Loading...</td></tr>`;
+        document.getElementById('sectorBuyDetailBody').innerHTML = loadingHtml;
+        
+        // THIS IS THE LINE I FIXED
+        document.getElementById('sectorSellDetailBody').innerHTML = loadingHtml; // Was 'loadingHtm'
+        
+        sectorModal.show(); // This line will now be reached
+
+        fetch(`${sectorDetailsURL}?broker_no=${brokerNo}&start_date=${startDate}&end_date=${endDate}`)
+            .then(r => r.json())
+            .then(data => {
+                if (data.error) throw new Error(data.error);
+                currentBrokerContext.broker_totals = data.broker_totals;
+                const { sector_data, broker_totals, grand_total_turnover } = data;
+
+                const buyBody = document.getElementById('sectorBuyDetailBody');
+                const sellBody = document.getElementById('sectorSellDetailBody');
+
+                const buys = sector_data.filter(s => s.sector_buy > 0)
+                    .sort((a, b) => b.sector_buy - a.sector_buy);
+                buyBody.innerHTML = buys.length ? buys.map(s => {
+                    const pBroker = broker_totals.total_buy ?
+                        (s.sector_buy / broker_totals.total_buy * 100).toFixed(2) : 0;
+                    const pMarket = grand_total_turnover ?
+                        (s.sector_buy / grand_total_turnover * 100).toFixed(2) : 0;
+                    return `<tr class="clickable-row" onclick="showScriptDetails('${s.sector}')">
+                        <td>${s.sector}</td>
+                        <td class="font-numeric text-end">${formatNumber(s.sector_buy)}</td>
+                        <td class="font-numeric text-end">${pBroker}%</td>
+                        <td class="font-numeric text-end">${pMarket}%</td>
+                    </tr>`;
+                }).join('') : `<tr><td colspan="4" class="text-center py-3">No buy data.</td></tr>`;
+
+                const sells = sector_data.filter(s => s.sector_sell > 0)
+                    .sort((a, b) => b.sector_sell - a.sector_sell);
+                sellBody.innerHTML = sells.length ? sells.map(s => {
+                    const pBroker = broker_totals.total_sell ?
+                        (s.sector_sell / broker_totals.total_sell * 100).toFixed(2) : 0;
+                    const pMarket = grand_total_turnover ?
+                        (s.sector_sell / grand_total_turnover * 100).toFixed(2) : 0;
+                    return `<tr class="clickable-row" onclick="showScriptDetails('${s.sector}')">
+                        <td>${s.sector}</td>
+                        <td class="font-numeric text-end">${formatNumber(s.sector_sell)}</td>
+                        <td class="font-numeric text-end">${pBroker}%</td>
+                        <td class="font-numeric text-end">${pMarket}%</td>
+                    </tr>`;
+                }).join('') : `<tr><td colspan="4" class="text-center py-3">No sell data.</td></tr>`;
+            })
+            .catch(e => {
+                console.error('Error fetching sector details:', e);
+                const errHtml = `<tr><td colspan="4" class="text-center py-3 text-danger">Failed to load data.</td></tr>`;
+                document.getElementById('sectorBuyDetailBody').innerHTML = errHtml;
+                document.getElementById('sectorSellDetailBody').innerHTML = errHtml;
+            });
+    }
+
+    // This function must be on the window object to be called by 'onclick'
+    window.showScriptDetails = function(sector) { 
+        const { brokerNo, startDate, endDate, broker_totals } = currentBrokerContext;
+        document.getElementById('scriptModalTitle').textContent = `Script Details for ${sector}`;
+        const loadingHtml = `<tr><td colspan="4" class="text-center py-3">Loading...</td></tr>`;
+        document.getElementById('scriptBuyDetailBody').innerHTML = loadingHtml;
+        document.getElementById('scriptSellDetailBody').innerHTML = loadingHtml;
+        scriptModal.show();
+
+        fetch(`${scriptDetailsURL}?broker_no=${brokerNo}&sector=${encodeURIComponent(sector)}&start_date=${startDate}&end_date=${endDate}&broker_total_buy=${broker_totals.total_buy}&broker_total_sell=${broker_totals.total_sell}`)
+            .then(r => r.json())
+            .then(data => {
+                if (data.error) throw new Error(data.error);
+                const { script_data, sector_totals } = data;
+                const buyBody = document.getElementById('scriptBuyDetailBody');
+                const sellBody = document.getElementById('scriptSellDetailBody');
+
+                const buys = script_data.filter(s => s.script_buy > 0)
+                    .sort((a, b) => b.script_buy - a.script_buy);
+                buyBody.innerHTML = buys.length ? buys.map(s => {
+                    const pSector = sector_totals.total_buy ?
+                        (s.script_buy / sector_totals.total_buy * 100).toFixed(2) : 0;
+                    const pBroker = broker_totals.total_buy ?
+                        (s.script_buy / broker_totals.total_buy * 100).toFixed(2) : 0;
+                    return `<tr><td>${s.stock_symbol}</td>
+                        <td class="font-numeric text-end">${formatNumber(s.script_buy)}</td>
+                        <td class="font-numeric text-end">${pSector}%</td>
+                        <td class="font-numeric text-end">${pBroker}%</td></tr>`;
+                }).join('') : `<tr><td colspan="4" class="text-center py-3">No buy data.</td></tr>`;
+
+                const sells = script_data.filter(s => s.script_sell > 0)
+                    .sort((a, b) => b.script_sell - a.script_sell);
+                sellBody.innerHTML = sells.length ? sells.map(s => {
+                    const pSector = sector_totals.total_sell ?
+                        (s.script_sell / sector_totals.total_sell * 100).toFixed(2) : 0;
+                    const pBroker = broker_totals.total_sell ?
+                        (s.script_sell / broker_totals.total_sell * 100).toFixed(2) : 0;
+                    return `<tr><td>${s.stock_symbol}</td>
+                        <td class="font-numeric text-end">${formatNumber(s.script_sell)}</td>
+                        <td class="font-numeric text-end">${pSector}%</td>
+                        <td class="font-numeric text-end">${pBroker}%</td></tr>`;
+                }).join('') : `<tr><td colspan="4" class="text-center py-3">No sell data.</td></tr>`;
+            })
+            .catch(e => {
+                console.error('Error fetching script details:', e);
+                const errHtml = `<tr><td colspan="4" class="text-center py-3 text-danger">Failed to load script data.</td></tr>`;
+                document.getElementById('scriptBuyDetailBody').innerHTML = errHtml;
+                document.getElementById('scriptSellDetailBody').innerHTML = errHtml;
+            });
+    };
+
+    // --- CHART RENDER ---
+    function renderChart() {
+        if (daywiseChart) daywiseChart.destroy();
+        const settlementData = {{ settlement_data_json|safe }};
+        const chartData = settlementData.slice().reverse();
+        const labels = chartData.map(d => d.calculation_date.split('-').slice(1).join('-'));
+        const buyData = chartData.map(d => d.buy_amount);
+        const sellData = chartData.map(d => d.sell_amount);
+        const totalData = chartData.map(d => d.total_amount);
+        const matchingData = chartData.map(d => d.matching_amount);
+
+        const ctx = document.getElementById('daywiseChart').getContext('2d');
+        daywiseChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels,
+                datasets: [
+                    { type: 'bar', label: 'Buy Amount', data: buyData, backgroundColor: 'rgba(25, 135, 84, 0.7)' },
+                    { type: 'bar', label: 'Sell Amount', data: sellData, backgroundColor: 'rgba(220, 53, 69, 0.7)' },
+                    { type: 'line', label: 'Total Turnover', data: totalData, borderColor: 'rgba(13, 110, 253, 1)', yAxisID: 'y1', tension: 0.2 },
+                    { type: 'line', label: 'Matching', data: matchingData, borderColor: 'rgba(108, 117, 125, 1)', yAxisID: 'y1', tension: 0.2 }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${formatToCrore(ctx.parsed.y)}` } } },
+                scales: {
+                    x: { grid: { display: false } },
+                    y: { beginAtZero: true, grid: { color: '#e9ecef' }, ticks: { callback: value => new Intl.NumberFormat('en-US', { notation: 'compact' }).format(value) } },
+                    y1: { position: 'right', beginAtZero: true, grid: { drawOnChartArea: false }, ticks: { callback: value => new Intl.NumberFormat('en-US', { notation: 'compact' }).format(value) } }
+                }
+            }
+        });
+    }
+
+    // Helper functions
+    function formatNumber(num) {
+        return parseFloat(num).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    function formatToCrore(value) {
+        if (isNaN(value) || value === null) return '0.00 Cr';
+        return `${(value / 10000000).toFixed(2)} Cr`;
+    }
+});
+</script>
+{% endblock scripts %}

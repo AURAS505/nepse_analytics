@@ -14,4 +14,5 @@ urlpatterns = [
     path('companies/', include('listed_companies.urls')),
     path('adjustments/', include('adjustments_stock_price.urls')),
     # path('analysis/', include('statistical_analysis.urls')),
+    path('floorsheet/', include('floorsheet_analysis.urls')),
 ]

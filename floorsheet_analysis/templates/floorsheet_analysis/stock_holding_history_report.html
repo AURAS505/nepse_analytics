@@ -1,0 +1,559 @@
+{% extends 'base.html' %}
+{% load humanize %}
+
+{% block title %}Daily Holdings - Hathway Analytics Suite{% endblock %}
+
+{% block styles %}
+    <style>
+        body { background-color: #f8f9fa; }
+        .nav-custom .nav-link { padding: 0.5rem 1rem; border-radius: 0.375rem; font-size: 0.875rem; font-weight: 500; color: #4B5563; }
+        .nav-custom .nav-link:hover { background-color: #F3F4F6; }
+        .nav-custom .nav-link.active { color: #0d6efd; background-color: #e7f1ff; }
+        .table-responsive { max-height: 70vh; overflow-y: auto; }
+        .table thead th { position: sticky; top: 0; z-index: 1; background-color: #f8f9fa; }
+        .header-buy { background-color: rgba(25, 135, 84, 0.15) !important; }
+        .header-sell { background-color: rgba(220, 53, 69, 0.15) !important; }
+        .text-buy { color: #146c43; }
+        .text-sell { color: #b02a37; }
+        .negative { color: #dc3545; }
+        .positive { color: #198754; }
+        .clickable-detail { cursor: pointer; color: #0d6efd; }
+        .loading-spinner { border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin: 20px auto; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .sortable-th { cursor: pointer; position: relative; user-select: none; }
+        .sortable-th .sort-icon::after { content: ' \2195'; opacity: 0.3; }
+        .sortable-th.sorted-asc .sort-icon::after { content: ' \2191'; opacity: 1; }
+        .sortable-th.sorted-desc .sort-icon::after { content: ' \2193'; opacity: 1; }
+        
+        #brokerDropdownMenu {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .dropdown-item-text.form-check {
+            padding-left: 2.5em; 
+        }
+        .form-check-label {
+            cursor: pointer; 
+        }
+    </style>
+{% endblock styles %}
+
+{% block content %}
+<div class="container-fluid">
+    <header class="text-center mb-4">
+        <h1 class="display-5 fw-bold">Stock Daily Holding History</h1>
+    </header>
+
+    <nav class="nav nav-pills flex-column flex-sm-row nav-custom justify-content-center mb-4 bg-white p-2 rounded-3 shadow-sm">
+        <a class="flex-sm-fill text-sm-center nav-link" href="{% url 'floorsheet_analysis:settlement_report' %}">Settlement Report</a>
+        <a class="flex-sm-fill text-sm-center nav-link" href="#">Live Floorsheet</a>
+        <a class="flex-sm-fill text-sm-center nav-link" href="{% url 'floorsheet_analysis:company_trades_report' %}">Company Trades</a>
+        <a class="flex-sm-fill text-sm-center nav-link" href="{% url 'floorsheet_analysis:broker_trades_report' %}">Broker Trades</a>
+        <a class="flex-sm-fill text-sm-center nav-link active" aria-current="page" href="{% url 'floorsheet_analysis:stock_holding_history_report' %}">Daily Holdings</a>
+        <a class="flex-sm-fill text-sm-center nav-link" href="#">Accum/Dist</a>
+    </nav>
+
+    <div class="card card-body mb-4">
+        <form method="GET" action="{% url 'floorsheet_analysis:stock_holding_history_report' %}" id="filterForm">
+            <div class="row g-3 align-items-end">
+                <div class="col-md-3"><label for="stock_symbol" class="form-label">Symbol</label><select name="stock_symbol" id="stock_symbol" class="form-select">{% for stock in stocks %}<option value="{{ stock.stock_symbol }}" {% if stock.stock_symbol == selected_stock %}selected{% endif %}>{{ stock.stock_symbol }}</option>{% endfor %}</select></div>
+                
+                <div class="col-md-3">
+                    <label for="brokerDropdownToggle" class="form-label">Broker</label>
+                    <div class="dropdown">
+                        <button class="btn btn-outline-secondary dropdown-toggle w-100 text-start" type="button" id="brokerDropdownToggle" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
+                            Select Broker(s)
+                        </button>
+                        <ul class="dropdown-menu w-100" id="brokerDropdownMenu">
+                            <li>
+                                <div class="px-2 py-1">
+                                    <input type="text" class="form-control form-control-sm" id="brokerSearchInput" placeholder="Search broker..." autocomplete="off">
+                                </div>
+                            </li>
+                            <li>
+                                <div class="form-check dropdown-item-text">
+                                    <input class="form-check-input" type="checkbox" id="brokerMultiSelectToggle">
+                                    <label class="form-check-label fw-bold" for="brokerMultiSelectToggle">Enable Multi-select</label>
+                                </div>
+                            </li>
+                            <li>
+                                <div class="form-check dropdown-item-text">
+                                    <input class="form-check-input" type="checkbox" id="brokerSelectAll">
+                                    <label class="form-check-label fw-bold" for="brokerSelectAll">Select All</label>
+                                </div>
+                            </li>
+                            <li><hr class="dropdown-divider"></li>
+                            {% for broker in brokers %}
+                            <li>
+                                <div class="form-check dropdown-item-text">
+                                    <input class="form-check-input broker-checkbox" type="checkbox" name="broker_no" value="{{ broker.broker_no }}" id="broker_{{ broker.broker_no }}"
+                                        {# --- FIX 1: Removed |string filter --- #}
+                                        {% if broker.broker_no in selected_broker_nos %}checked{% endif %}>
+                                    <label class="form-check-label" for="broker_{{ broker.broker_no }}">
+                                        {{ broker.broker_no }} - {{ broker.name }}
+                                    </label>
+                                </div>
+                            </li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                </div>
+                
+                <div class="col-md-2"><label class="form-label">Time Period</label><div class="btn-group w-100" role="group">
+                    {# --- FIX 2: Loop over time_periods list --- #}
+                    {% for period in time_periods %}
+                    <button type="button" class="btn btn-outline-primary time-period-btn {% if period == selected_period %}active{% endif %}" data-period="{{ period }}">{{ period }}</button>
+                    {% endfor %}
+                </div>
+                    <input type="hidden" name="time_period" id="time_period_input" value="{{ selected_period }}">
+                    <input type="hidden" id="filter_start_date" value="{{ start_date }}">
+                    <input type="hidden" id="filter_end_date" value="{{ end_date }}">
+                </div>
+                
+                <div class="col-md-1"></div>
+
+                <div class="col-md-1"><button type="button" id="costCalBtn" class="btn btn-success w-100">Cost Cal</button></div>
+                <div class="col-md-1"><button type="button" id="viewDetailsBtn" class="btn btn-secondary w-100">Details</button></div>
+                
+                <div class="col-md-1"><button type="submit" class="btn btn-primary w-100">Filter</button></div>
+            </div>
+        </form>
+    </div>
+
+    <div class="card">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-striped table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Date</th>
+                            <th class="text-end header-buy">Buy Quantity</th><th class="text-end header-buy">Buy Rate</th><th class="text-end header-buy">Buy Amount</th>
+                            <th class="text-end header-sell">Sell Quantity</th><th class="text-end header-sell">Sell Rate</th><th class="text-end header-sell">Sell Amount</th>
+                            <th class="text-end">Net Quantity</th><th class="text-end">Cumulative Qty</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in history_data %}
+                        <tr>
+                            <td>{{ row.calculation_date|date:"Y-m-d" }}</td>
+                            <td class="text-end text-buy">{{ row.buy_quantity|intcomma }}</td>
+                            <td class="text-end text-buy">{{ row.buy_rate|floatformat:2|intcomma }}</td>
+                            <td class="text-end text-buy">{{ row.buy_amount|floatformat:2|intcomma }}</td>
+                            <td class="text-end text-sell">{{ row.sell_quantity|intcomma }}</td>
+                            <td class="text-end text-sell">{{ row.sell_rate|floatformat:2|intcomma }}</td>
+                            <td class="text-end text-sell">{{ row.sell_amount|floatformat:2|intcomma }}</td>
+                            <td class="text-end fw-bold {% if row.net_quantity < 0 %}negative{% else %}positive{% endif %}">{{ row.net_quantity|intcomma }}</td>
+                            <td class="text-end fw-bold {% if row.cumulative_qty < 0 %}negative{% endif %}">{{ row.cumulative_qty|intcomma }}</td>
+                        </tr>
+                        {% empty %}
+                            {# Check if form was submitted (by checking for stock_symbol in GET) #}
+                            {% if request.GET.stock_symbol or request.POST.stock_symbol %}
+                            <tr><td colspan="9" class="text-center py-4 text-muted">No trading data found.</td></tr>
+                            {% else %}
+                            <tr><td colspan="9" class="text-center py-4 text-muted">Select filters to see history.</td></tr>
+                            {% endif %}
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# --- MODALS --- #}
+<div class="modal fade" id="detailsModal" tabindex="-1"><div class="modal-dialog modal-xl modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h5 class="modal-title" id="detailsModalTitle">Top Brokers Summary</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="row"><div class="col-md-6"><h6 class="text-success">Top 10 Net Buyers</h6><table class="table table-sm"><thead><tr><th>Broker</th><th class="text-end">Net Qty</th><th class="text-end">Avg. Buy Rate</th><th class="text-end">Avg. Sell Rate</th></tr></thead><tbody id="topBuyersBody"></tbody></table></div><div class="col-md-6"><h6 class="text-danger">Top 10 Net Sellers</h6><table class="table table-sm"><thead><tr><th>Broker</th><th class="text-end">Net Qty</th><th class="text-end">Avg. Buy Rate</th><th class="text-end">Avg. Sell Rate</th></tr></thead><tbody id="topSellersBody"></tbody></table></div></div></div></div></div></div>
+
+<div class="modal fade" id="costCalModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="costCalModalTitle">Cost Calculation Summary</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small">Calculations based on the data currently displayed in the table for the selected period.</p>
+                <div id="costCalModalBody"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="detailModal" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="modalTitle">Floorsheet Details</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <button id="matchingButton" class="btn btn-sm btn-info">Matching</button>
+                    <div class="d-flex gap-2">
+                        <input type="text" id="buyerFilter" class="form-control form-control-sm" placeholder="Filter Buyer...">
+                        <input type="text" id="sellerFilter" class="form-control form-control-sm" placeholder="Filter Seller...">
+                    </div>
+                </div>
+                <div class="loading-spinner" id="modalSpinner" style="display: none;"></div>
+                <div class="table-responsive" style="max-height: 60vh;">
+                    <table class="table table-sm table-striped">
+                        <thead><tr>
+                            <th class="sortable-th" data-column="contract_no" data-type="string">Contract No.<span class="sort-icon"></span></th>
+                            <th>Symbol</th><th>Buyer</th><th>Seller</th>
+                            <th class="text-end sortable-th" data-column="quantity" data-type="number">Quantity<span class="sort-icon"></span></th>
+                            <th class="text-end">Rate</th>
+                            <th class="text-end sortable-th" data-column="amount" data-type="number">Amount<span class="sort-icon"></span></th>
+                        </tr></thead>
+                        <tbody id="modalTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock content %}
+
+
+{% block scripts %}
+<script src="[https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js](https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js)"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // --- INITIALIZATION ---
+    const periodInput = document.getElementById('time_period_input');
+    const periodButtons = document.querySelectorAll('.time-period-btn');
+    const viewDetailsBtn = document.getElementById('viewDetailsBtn');
+    const costCalBtn = document.getElementById('costCalBtn'); 
+    const filterForm = document.getElementById('filterForm');
+    // Handle both GET and POST forms for CSRF
+    const csrfTokenEl = document.querySelector('form [name=csrfmiddlewaretoken]');
+    const csrftoken = csrfTokenEl ? csrfTokenEl.value : null;
+    
+    // Bootstrap Modals
+    const detailsModal = new bootstrap.Modal(document.getElementById('detailsModal'));
+    const detailModal = new bootstrap.Modal(document.getElementById('detailModal'));
+    const costCalModal = new bootstrap.Modal(document.getElementById('costCalModal')); 
+    
+    // State variables
+    let activeStartDate = document.getElementById('filter_start_date').value;
+    let activeEndDate = document.getElementById('filter_end_date').value;
+    let originalDetailedData = [];
+    let isMatchingFilterActive = false;
+    
+    // --- Broker Dropdown Elements ---
+    const brokerDropdownToggle = document.getElementById('brokerDropdownToggle');
+    const brokerSelectAll = document.getElementById('brokerSelectAll');
+    const brokerCheckboxes = document.querySelectorAll('.broker-checkbox');
+    const brokerSearchInput = document.getElementById('brokerSearchInput');
+    const brokerMultiSelectToggle = document.getElementById('brokerMultiSelectToggle');
+    const selectAllContainer = brokerSelectAll.closest('li');
+    let isMultiSelectEnabled = false;
+
+    // --- Broker Name Map ---
+    const brokerNameMap = {{ broker_name_map_json|safe }};
+
+    // --- EVENT LISTENERS ---
+
+    periodButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            periodInput.value = button.dataset.period;
+            filterForm.submit();
+        });
+    });
+
+    viewDetailsBtn.addEventListener('click', handleViewDetailsClick);
+    costCalBtn.addEventListener('click', handleCostCalculation); 
+
+    document.getElementById('detailsModal').addEventListener('click', (e) => {
+        if (e.target.classList.contains('clickable-detail')) {
+            showFloorsheetModal(e.target.dataset.type, e.target.dataset.name);
+        }
+    });
+
+    document.getElementById('matchingButton').addEventListener('click', () => {
+        isMatchingFilterActive = !isMatchingFilterActive;
+        applyFiltersAndRender();
+    });
+    document.getElementById('buyerFilter').addEventListener('input', applyFiltersAndRender);
+    document.getElementById('sellerFilter').addEventListener('input', applyFiltersAndRender);
+    document.getElementById('detailModal').querySelectorAll('.sortable-th').forEach(header => {
+        header.addEventListener('click', () => sortModalTable(header));
+    });
+    
+    // --- Broker Dropdown Listeners ---
+    brokerSearchInput.addEventListener('input', () => {
+        const filter = brokerSearchInput.value.toLowerCase().trim();
+        brokerCheckboxes.forEach(cb => {
+            const li = cb.closest('li');
+            const label = li.querySelector('label').textContent.toLowerCase();
+            li.style.display = label.includes(filter) ? 'block' : 'none';
+        });
+    });
+
+    brokerSearchInput.addEventListener('click', (e) => e.stopPropagation());
+
+    brokerMultiSelectToggle.addEventListener('change', () => {
+        isMultiSelectEnabled = brokerMultiSelectToggle.checked;
+        selectAllContainer.style.display = isMultiSelectEnabled ? 'block' : 'none';
+        if (!isMultiSelectEnabled) {
+            brokerSelectAll.checked = false; 
+            let firstSelected = null;
+            brokerCheckboxes.forEach(cb => {
+                if (cb.checked) {
+                    if (!firstSelected) {
+                        firstSelected = cb;
+                    } else {
+                        cb.checked = false; 
+                    }
+                }
+            });
+            syncUI();
+        }
+    });
+
+    brokerCheckboxes.forEach(cb => {
+        cb.addEventListener('change', () => {
+            if (!isMultiSelectEnabled && cb.checked) {
+                brokerCheckboxes.forEach(otherCb => {
+                    if (otherCb !== cb) otherCb.checked = false;
+                });
+            }
+            syncUI();
+        });
+    });
+
+    brokerSelectAll.addEventListener('change', () => {
+        brokerCheckboxes.forEach(cb => {
+            if (cb.closest('li').style.display !== 'none') {
+                cb.checked = brokerSelectAll.checked;
+            }
+        });
+        syncUI();
+    });
+
+    // --- FUNCTIONS ---
+    
+    function updateDropdownText(selectedBrokers) {
+        if (selectedBrokers.length === 0) {
+            brokerDropdownToggle.textContent = 'Select Broker(s)';
+        } else if (selectedBrokers.length === 1) {
+            const selectedCheckbox = [...brokerCheckboxes].find(cb => cb.value === selectedBrokers[0]);
+            brokerDropdownToggle.textContent = selectedCheckbox.parentElement.querySelector('label').textContent.trim();
+        } else if (selectedBrokers.length === brokerCheckboxes.length) {
+            brokerDropdownToggle.textContent = 'All Brokers Selected';
+        } else {
+            brokerDropdownToggle.textContent = `${selectedBrokers.length} Brokers Selected`;
+        }
+    }
+
+    function updateSelectAllCheckbox(selectedBrokers) {
+        if (!isMultiSelectEnabled) {
+            brokerSelectAll.checked = false;
+            brokerSelectAll.indeterminate = false;
+            return;
+        }
+        // Count only visible checkboxes
+        const visibleCheckboxes = [...brokerCheckboxes].filter(cb => cb.closest('li').style.display !== 'none');
+        if (selectedBrokers.length === 0) {
+            brokerSelectAll.checked = false;
+            brokerSelectAll.indeterminate = false;
+        } else if (selectedBrokers.length === visibleCheckboxes.length) {
+            brokerSelectAll.checked = true;
+            brokerSelectAll.indeterminate = false;
+        } else {
+            brokerSelectAll.checked = false;
+            brokerSelectAll.indeterminate = true;
+        }
+    }
+
+    function syncUI() {
+        const selectedBrokers = [...brokerCheckboxes].filter(cb => cb.checked).map(cb => cb.value);
+        updateDropdownText(selectedBrokers);
+        updateSelectAllCheckbox(selectedBrokers);
+    }
+    
+    function initializeBrokerMode() {
+        const selectedBrokers = [...brokerCheckboxes].filter(cb => cb.checked);
+        if (selectedBrokers.length > 1) {
+            isMultiSelectEnabled = true;
+            brokerMultiSelectToggle.checked = true;
+        } else {
+            isMultiSelectEnabled = false;
+            brokerMultiSelectToggle.checked = false;
+        }
+        selectAllContainer.style.display = isMultiSelectEnabled ? 'block' : 'none';
+    }
+    
+    // --- Cost Calculation Function ---
+    function handleCostCalculation() {
+        const rows = document.querySelectorAll('.table-responsive tbody tr');
+        if (rows.length === 0 || (rows.length === 1 && rows[0].getElementsByTagName('td').length > 1 && rows[0].getElementsByTagName('td')[0].hasAttribute('colspan'))) {
+            alert('No data in the table to calculate.');
+            return;
+        }
+
+        let totalBuyQty = 0, totalBuyAmt = 0, totalSellQty = 0, totalSellAmt = 0;
+        rows.forEach(row => {
+            const cells = row.getElementsByTagName('td');
+            if (cells.length < 9) return; 
+            totalBuyQty += parseFloat(cells[1].textContent.replace(/,/g, '') || 0);
+            totalBuyAmt += parseFloat(cells[3].textContent.replace(/,/g, '') || 0);
+            totalSellQty += parseFloat(cells[4].textContent.replace(/,/g, '') || 0);
+            totalSellAmt += parseFloat(cells[6].textContent.replace(/,/g, '') || 0);
+        });
+
+        const closingQty = totalBuyQty - totalSellQty;
+        const wabp = (totalBuyQty > 0) ? (totalBuyAmt / totalBuyQty) : 0;
+        const wasp = (totalSellQty > 0) ? (totalSellAmt / totalSellQty) : 0;
+        const cogs = wabp * totalSellQty; 
+        const realizedPL = totalSellAmt - cogs;
+        const closingAmount_Market = wasp * closingQty; 
+        const bep = (closingQty > 0 && (closingAmount_Market - realizedPL) > 0) ? ((closingAmount_Market - realizedPL) / closingQty) : 0; 
+
+        const fNum = (num, dec = 2) => num.toLocaleString('en-US', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+        const fInt = (num) => num.toLocaleString('en-US', { maximumFractionDigits: 0 });
+
+        const modalBody = document.getElementById('costCalModalBody');
+        modalBody.innerHTML = `
+            <table class="table table-sm" style="font-size: 0.95rem;">
+                <tbody>
+                    <tr><td>Total Buy Quantity</td><td class="text-end">${fInt(totalBuyQty)}</td></tr>
+                    <tr><td>Total Buy Amount</td><td class="text-end">${fNum(totalBuyAmt)}</td></tr>
+                    <tr><td class="ps-4">Weighted Avg. Buy Price</td><td class="text-end">${fNum(wabp)}</td></tr>
+                    <tr class="border-top"><td class="fw-bold">Total Sell Quantity</td><td class="text-end fw-bold">${fInt(totalSellQty)}</td></tr>
+                    <tr><td>Total Sell Amount</td><td class="text-end">${fNum(totalSellAmt)}</td></tr>
+                    <tr><td class="ps-4">Weighted Avg. Sell Price</td><td class="text-end">${fNum(wasp)}</td></tr>
+                    <tr class="border-top"><td>Cost of Goods Sold (COGS)</td><td class="text-end">${fNum(cogs)}</td></tr>
+                    <tr class="border-top"><td class="fw-bold fs-5">Realized P/L</td><td class="text-end fw-bold fs-5 ${realizedPL >= 0 ? 'text-success' : 'text-danger'}">${fNum(realizedPL)}</td></tr>
+                    <tr class="border-top"><td>Closing Quantity</td><td class="text-end">${fInt(closingQty)}</td></tr>
+                    <tr><td>Closing Amount (at avg. sell)</td><td class="text-end">${fNum(closingAmount_Market)}</td></tr>
+                    <tr class="border-top"><td class="fw-bold fs-5">Break-Even Price</td><td class="text-end fw-bold fs-5">${fNum(bep, 6)}</td></tr>
+                </tbody>
+            </table>`;
+        
+        const stockSymbol = document.getElementById('stock_symbol').value;
+        const brokerText = document.getElementById('brokerDropdownToggle').textContent.trim();
+        document.getElementById('costCalModalTitle').textContent = `Cost Calculation for ${stockSymbol} (${brokerText})`;
+        costCalModal.show();
+    }
+    
+    // --- "View Details" Click Handler ---
+    async function handleViewDetailsClick() {
+        const stockSymbol = document.getElementById('stock_symbol').value;
+        document.getElementById('detailsModalTitle').textContent = `Top Brokers Net Position for ${stockSymbol} (${activeStartDate} to ${activeEndDate})`;
+        
+        const loadingHtml = '<tr><td colspan="4" class="text-center"><div class="loading-spinner"></div></td></tr>';
+        document.getElementById('topBuyersBody').innerHTML = loadingHtml;
+        document.getElementById('topSellersBody').innerHTML = loadingHtml;
+        detailsModal.show();
+        
+        try {
+            const response = await fetch(`{% url 'floorsheet_analysis:api_stock_summary' %}?stock_symbol=${stockSymbol}&start_date=${activeStartDate}&end_date=${activeEndDate}`);
+            if (!response.ok) throw new Error('Network response was not ok');
+            const data = await response.json();
+            
+            const buyersBody = document.getElementById('topBuyersBody');
+            buyersBody.innerHTML = (data.net_buyers && data.net_buyers.length > 0) ? data.net_buyers.map(b => `<tr><td class="clickable-detail" data-type="broker" data-name="${b.broker}" title="${brokerNameMap[b.broker] || ''}">${b.broker}</td><td class="text-end text-success fw-bold">${b.net_quantity.toLocaleString()}</td><td class="text-end">${parseFloat(b.avg_buy_rate).toFixed(2)}</td><td class="text-end">${b.avg_sell_rate > 0 ? parseFloat(b.avg_sell_rate).toFixed(2) : '-'}</td></tr>`).join('') : '<tr><td colspan="4" class="text-center text-muted">No net buyers found.</td></tr>';
+            
+            const sellersBody = document.getElementById('topSellersBody');
+            sellersBody.innerHTML = (data.net_sellers && data.net_sellers.length > 0) ? data.net_sellers.map(s => `<tr><td class="clickable-detail" data-type="broker" data-name="${s.broker}" title="${brokerNameMap[s.broker] || ''}">${s.broker}</td><td class="text-end text-danger fw-bold">${s.net_quantity.toLocaleString()}</td><td class="text-end">${s.avg_buy_rate > 0 ? parseFloat(s.avg_buy_rate).toFixed(2) : '-'}</td><td class="text-end">${parseFloat(s.avg_sell_rate).toFixed(2)}</td></tr>`).join('') : '<tr><td colspan="4" class="text-center text-muted">No net sellers found.</td></tr>';
+        } catch (error) {
+            console.error("Failed to fetch details:", error);
+            document.getElementById('topBuyersBody').innerHTML = `<tr><td colspan="4" class="text-center text-danger">Failed to load data.</td></tr>`;
+            document.getElementById('topSellersBody').innerHTML = `<tr><td colspan="4" class="text-center text-danger">Failed to load data.</td></tr>`;
+        }
+    }
+
+    // --- Show Floorsheet Modal ---
+    async function showFloorsheetModal(type, name) {
+        document.getElementById('modalTitle').textContent = `Loading Floorsheet for Broker: ${name}`;
+        document.getElementById('modalSpinner').style.display = 'block';
+        document.getElementById('modalTableBody').innerHTML = '';
+        detailModal.show();
+        const stockSymbol = document.getElementById('stock_symbol').value;
+
+        try {
+            const headers = { 'Content-Type': 'application/json' };
+            if (csrftoken) {
+                headers['X-CSRFToken'] = csrftoken;
+            }
+            const response = await fetch("{% url 'floorsheet_analysis:get_floorsheet_details' %}", {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify({ stock_symbol: stockSymbol, start_date: activeStartDate, end_date: activeEndDate, type: type, name: name }),
+            });
+            if (!response.ok) throw new Error('Network error');
+            
+            originalDetailedData = await response.json();
+            document.getElementById('modalTitle').textContent = `Floorsheet for Broker ${name} on ${stockSymbol}`;
+            document.getElementById('modalSpinner').style.display = 'none';
+            applyFiltersAndRender();
+        } catch (error) {
+            console.error('Error fetching floorsheet data:', error);
+            document.getElementById('modalSpinner').style.display = 'none';
+            document.getElementById('modalTableBody').innerHTML = '<tr><td colspan="7" class="text-center text-danger">Failed to load data.</td></tr>';
+        }
+    }
+
+    function renderFloorsheetTable(data) {
+        const modalTableBody = document.getElementById('modalTableBody');
+        modalTableBody.innerHTML = data.length > 0 ? data.map(row => `<tr><td>${row.contract_no}</td><td>${row.stock_symbol}</td><td>${row.buyer}</td><td>${row.seller}</td><td class="text-end">${parseFloat(row.quantity).toLocaleString()}</td><td class="text-end">${parseFloat(row.rate).toFixed(2)}</td><td class="text-end">${parseFloat(row.amount).toLocaleString('en-US',{minimumFractionDigits:2})}</td></tr>`).join('') : '<tr><td colspan="7" class="text-center">No transactions found.</td></tr>';
+    }
+
+    function applyFiltersAndRender() {
+        let filteredData = [...originalDetailedData];
+        if (isMatchingFilterActive) {
+            filteredData = filteredData.filter(row => row.buyer === row.seller);
+        }
+        const buyerFilter = document.getElementById('buyerFilter').value.toLowerCase();
+        if (buyerFilter) {
+            filteredData = filteredData.filter(row => String(row.buyer).toLowerCase().includes(buyerFilter));
+        }
+        const sellerFilter = document.getElementById('sellerFilter').value.toLowerCase();
+        if (sellerFilter) {
+            filteredData = filteredData.filter(row => String(row.seller).toLowerCase().includes(sellerFilter));
+        }
+        renderFloorsheetTable(filteredData);
+    }
+
+    // --- Sort Floorsheet Modal Table ---
+    let modalSort = { column: null, direction: 'asc' };
+    function sortModalTable(header) {
+        const tbody = document.getElementById('modalTableBody');
+        if (!originalDetailedData || originalDetailedData.length === 0) return;
+        
+        const column = header.dataset.column;
+        const columnType = header.dataset.type;
+
+        if (modalSort.column === column) {
+            modalSort.direction = modalSort.direction === 'asc' ? 'desc' : 'asc';
+        } else {
+            modalSort.column = column;
+            modalSort.direction = 'asc';
+        }
+        const sortDir = modalSort.direction === 'asc' ? 1 : -1;
+
+        document.getElementById('detailModal').querySelectorAll('.sortable-th').forEach(h => h.classList.remove('sorted-asc', 'sorted-desc'));
+        header.classList.add(modalSort.direction === 'asc' ? 'sorted-asc' : 'sorted-desc');
+
+        const dataToSort = [...filteredData]; // Sort the currently filtered data
+        
+        dataToSort.sort((a, b) => {
+            let valA = a[column];
+            let valB = b[column];
+            if (columnType === 'number') {
+                valA = parseFloat(valA) || 0;
+                valB = parseFloat(valB) || 0;
+                return (valA - valB) * sortDir;
+            } else {
+                return String(valA).localeCompare(String(valB)) * sortDir;
+            }
+        });
+        renderFloorsheetTable(dataToSort);
+    }
+    
+    // --- Initialize Page ---
+    initializeBrokerMode();
+    syncUI();
+});
+</script>
+{% endblock scripts %}
+}

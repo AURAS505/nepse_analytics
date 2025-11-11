@@ -36,7 +36,7 @@ SECRET_KEY = env('SECRET_KEY')
 DEBUG = env('DEBUG')
 
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['192.168.1.10', '127.0.0.1', 'localhost']
 
 
 # Application definition
@@ -56,6 +56,7 @@ INSTALLED_APPS = [
     'nepse_data.apps.NepseDataConfig',  # <-- This one
     'adjustments_stock_price.apps.AdjustmentsStockPriceConfig',
     'statistical_analysis.apps.StatisticalAnalysisConfig',
+    'floorsheet_analysis.apps.FloorsheetAnalysisConfig'
 ]
 
 MIDDLEWARE = [
