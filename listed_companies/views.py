@@ -3,7 +3,7 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.http import JsonResponse, HttpResponse
 from django.views.decorators.http import require_POST
 from django.contrib import messages
-from .models import Companies
+from .models import Companies, FloorsheetRaw
 from nepse_data.models import StockPrices # We need this for the check
 import pandas as pd
 import csv
@@ -211,20 +211,29 @@ def download_sample_xlsx_view(request):
 
 def check_missing_companies_view(request):
     """
-    API endpoint to find companies in stock data that are
-    not in the main companies list.
+    Compares stock symbols in the raw floorsheet with tickers in the companies table
+    to find any stocks that have not yet been added to the company list.
     """
+    
+    # In Django, we check the method *inside* the view
+    if request.method != 'GET':
+        return JsonResponse({"status": "error", "message": "GET method required"}, status=405)
+
     try:
-        # This line is fine
-        existing_tickers = set(Companies.objects.values_list('script_ticker', flat=True))
+        # 1. Get all unique script tickers from the companies table
+        #    The ORM is efficient and returns a set directly.
+        existing_tickers = set(Companies.objects.values_list('script_ticker', flat=True).distinct())
 
-        # --- THIS IS THE CORRECTED LINE ---
-        # We use .values_list(...).distinct() which works on all databases
-        floorsheet_symbols = set(StockPrices.objects.values_list('symbol', flat=True).distinct())
-        # --- END OF FIX ---
+        # 2. Get all unique stock symbols from the floorsheet_raw table
+        floorsheet_symbols = set(FloorsheetRaw.objects.values_list('stock_symbol', flat=True).distinct())
 
+        # 3. Find symbols in the floorsheet that are not in the companies table
+        #    This logic is pure Python and stays the same.
         missing_companies = sorted(list(floorsheet_symbols - existing_tickers))
-
+        
         return JsonResponse({"status": "success", "missing_companies": missing_companies})
+
     except Exception as e:
-        return JsonResponse({"status": "error", "message": str(e)}, status=500)
+        # A generic catch-all. Django also has specific exceptions like DatabaseError
+        print(f"Error checking for missing companies: {e}")
+        return JsonResponse({"status": "error", "message": f"Database error: {e}"}, status=500)

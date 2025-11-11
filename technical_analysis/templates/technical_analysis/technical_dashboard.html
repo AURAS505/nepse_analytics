@@ -1,0 +1,512 @@
+{% extends "base.html" %}
+
+{% block title %}Technical Analysis Dashboard - NEPSE Analyst{% endblock %}
+
+{% block title_header %}
+<i class="bi bi-graph-up"></i> Technical Analysis Dashboard
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-xl-11 mx-auto">
+
+        <!-- Hero Section -->
+        <div class="p-5 mb-4 bg-gradient rounded-3 shadow-sm border" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+            <div class="container-fluid py-4 text-dark">
+                <h1 class="display-5 fw-bold">
+                    <i class="bi bi-graph-up-arrow"></i> Technical Analysis Center
+                </h1>
+                <p class="col-md-9 fs-4">Advanced charting, indicators, signals, and pattern recognition for NEPSE stocks. Make data-driven trading decisions.</p>
+                <div class="d-flex gap-3 flex-wrap mt-4">
+                    <a href="{% url 'technical_analysis:stock_screener' %}" class="btn btn-light btn-lg">
+                        <i class="bi bi-funnel"></i> Stock Screener
+                    </a>
+                    <a href="{% url 'technical_analysis:chart_viewer' %}" class="btn btn-light btn-lg">
+                        <i class="bi bi-bar-chart-line"></i> Chart Viewer
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Stats Row -->
+        <div class="row g-4 mb-4">
+            <div class="col-md-3">
+                <div class="card h-100 shadow-sm border-primary">
+                    <div class="card-body text-center p-4">
+                        <div class="mb-3">
+                            <i class="bi bi-bullseye text-primary" style="font-size: 2.5rem;"></i>
+                        </div>
+                        <h3 class="fw-bold text-primary">{{ active_signals|default:"0" }}</h3>
+                        <p class="text-muted mb-0">Active Signals</p>
+                        <small class="text-muted">Buy/Sell Alerts</small>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-3">
+                <div class="card h-100 shadow-sm border-success">
+                    <div class="card-body text-center p-4">
+                        <div class="mb-3">
+                            <i class="bi bi-star text-success" style="font-size: 2.5rem;"></i>
+                        </div>
+                        <h3 class="fw-bold text-success">{{ bullish_stocks|default:"0" }}</h3>
+                        <p class="text-muted mb-0">Bullish Stocks</p>
+                        <small class="text-muted">Strong Buy Signals</small>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-3">
+                <div class="card h-100 shadow-sm border-danger">
+                    <div class="card-body text-center p-4">
+                        <div class="mb-3">
+                            <i class="bi bi-exclamation-triangle text-danger" style="font-size: 2.5rem;"></i>
+                        </div>
+                        <h3 class="fw-bold text-danger">{{ bearish_stocks|default:"0" }}</h3>
+                        <p class="text-muted mb-0">Bearish Stocks</p>
+                        <small class="text-muted">Sell Signals</small>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-3">
+                <div class="card h-100 shadow-sm border-info">
+                    <div class="card-body text-center p-4">
+                        <div class="mb-3">
+                            <i class="bi bi-search text-info" style="font-size: 2.5rem;"></i>
+                        </div>
+                        <h3 class="fw-bold text-info">{{ patterns_detected|default:"0" }}</h3>
+                        <p class="text-muted mb-0">Patterns Found</p>
+                        <small class="text-muted">Chart Patterns</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Analysis Tools -->
+        <h2 class="mb-3">
+            <i class="bi bi-tools"></i> Analysis Tools
+        </h2>
+        <div class="row">
+            
+            <!-- Chart Viewer -->
+            <div class="col-lg-4 col-md-6 mb-4">
+                <div class="card h-100 shadow-sm">
+                    <div class="card-body d-flex flex-column">
+                        <div class="mb-3">
+                            <i class="bi bi-bar-chart-line text-primary" style="font-size: 2rem;"></i>
+                        </div>
+                        <h5 class="card-title text-primary">Interactive Charts</h5>
+                        <p class="card-text">View candlestick charts with multiple technical indicators overlay. Zoom, pan, and analyze price action.</p>
+                        <a href="{% url 'technical_analysis:chart_viewer' %}" class="btn btn-outline-primary mt-auto">
+                            <i class="bi bi-graph-up"></i> Open Charts
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stock Screener -->
+            <div class="col-lg-4 col-md-6 mb-4">
+                <div class="card h-100 shadow-sm">
+                    <div class="card-body d-flex flex-column">
+                        <div class="mb-3">
+                            <i class="bi bi-funnel text-success" style="font-size: 2rem;"></i>
+                        </div>
+                        <h5 class="card-title text-success">Stock Screener</h5>
+                        <p class="card-text">Filter stocks based on technical criteria: RSI levels, MA crossovers, volume spikes, and more.</p>
+                        <a href="{% url 'technical_analysis:stock_screener' %}" class="btn btn-outline-success mt-auto">
+                            <i class="bi bi-search"></i> Screen Stocks
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Trading Signals -->
+            <div class="col-lg-4 col-md-6 mb-4">
+                <div class="card h-100 shadow-sm">
+                    <div class="card-body d-flex flex-column">
+                        <div class="mb-3">
+                            <i class="bi bi-lightning-charge text-warning" style="font-size: 2rem;"></i>
+                        </div>
+                        <h5 class="card-title text-warning">Trading Signals</h5>
+                        <p class="card-text">Real-time buy/sell signals generated from multiple strategies and technical indicators.</p>
+                        <a href="{% url 'technical_analysis:signals' %}" class="btn btn-outline-warning mt-auto">
+                            <i class="bi bi-bullseye"></i> View Signals
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Pattern Recognition -->
+            <div class="col-lg-4 col-md-6 mb-4">
+                <div class="card h-100 shadow-sm">
+                    <div class="card-body d-flex flex-column">
+                        <div class="mb-3">
+                            <i class="bi bi-diagram-3 text-info" style="font-size: 2rem;"></i>
+                        </div>
+                        <h5 class="card-title text-info">Pattern Recognition</h5>
+                        <p class="card-text">Automatically detect chart patterns: Head & Shoulders, Triangles, Flags, and candlestick patterns.</p>
+                        <a href="{% url 'technical_analysis:patterns' %}" class="btn btn-outline-info mt-auto">
+                            <i class="bi bi-diagram-2"></i> Find Patterns
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Support & Resistance -->
+            <div class="col-lg-4 col-md-6 mb-4">
+                <div class="card h-100 shadow-sm">
+                    <div class="card-body d-flex flex-column">
+                        <div class="mb-3">
+                            <i class="bi bi-arrows-vertical text-danger" style="font-size: 2rem;"></i>
+                        </div>
+                        <h5 class="card-title text-danger">Support & Resistance</h5>
+                        <p class="card-text">Identify key price levels where stocks tend to reverse. Track breakouts and breakdowns.</p>
+                        <a href="{% url 'technical_analysis:support_resistance' %}" class="btn btn-outline-danger mt-auto">
+                            <i class="bi bi-activity"></i> View Levels
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Backtesting -->
+            <div class="col-lg-4 col-md-6 mb-4">
+                <div class="card h-100 shadow-sm">
+                    <div class="card-body d-flex flex-column">
+                        <div class="mb-3">
+                            <i class="bi bi-clock-history text-secondary" style="font-size: 2rem;"></i>
+                        </div>
+                        <h5 class="card-title text-secondary">Strategy Backtesting</h5>
+                        <p class="card-text">Test your trading strategies on historical data. Analyze performance, win rate, and drawdowns.</p>
+                        <a href="{% url 'technical_analysis:backtest' %}" class="btn btn-outline-secondary mt-auto">
+                            <i class="bi bi-graph-down"></i> Run Backtest
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Technical Indicators Section -->
+        <h2 class="mb-3 mt-5">
+            <i class="bi bi-speedometer2"></i> Technical Indicators
+        </h2>
+        <div class="row">
+
+            <!-- Trend Indicators -->
+            <div class="col-lg-3 col-md-6 mb-4">
+                <div class="card h-100 shadow-sm border-start border-primary border-4">
+                    <div class="card-body">
+                        <h6 class="card-title text-primary fw-bold mb-3">
+                            <i class="bi bi-arrow-up-right"></i> TREND INDICATORS
+                        </h6>
+                        <ul class="list-unstyled mb-0">
+                            <li class="mb-2">
+                                <a href="{% url 'technical_analysis:indicator_detail' 'sma' %}" class="text-decoration-none">
+                                    <i class="bi bi-chevron-right"></i> Moving Average (SMA)
+                                </a>
+                            </li>
+                            <li class="mb-2">
+                                <a href="{% url 'technical_analysis:indicator_detail' 'ema' %}" class="text-decoration-none">
+                                    <i class="bi bi-chevron-right"></i> Exponential MA (EMA)
+                                </a>
+                            </li>
+                            <li class="mb-2">
+                                <a href="{% url 'technical_analysis:indicator_detail' 'macd' %}" class="text-decoration-none">
+                                    <i class="bi bi-chevron-right"></i> MACD
+                                </a>
+                            </li>
+                            <li class="mb-2">
+                                <a href="{% url 'technical_analysis:indicator_detail' 'adx' %}" class="text-decoration-none">
+                                    <i class="bi bi-chevron-right"></i> ADX
+                                </a>
+                            </li>
+                            <li class="mb-2">
+                                <a href="{% url 'technical_analysis:indicator_detail' 'parabolic-sar' %}" class="text-decoration-none">
+                                    <i class="bi bi-chevron-right"></i> Parabolic SAR
+                                </a>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Momentum Indicators -->
+            <div class="col-lg-3 col-md-6 mb-4">
+                <div class="card h-100 shadow-sm border-start border-success border-4">
+                    <div class="card-body">
+                        <h6 class="card-title text-success fw-bold mb-3">
+                            <i class="bi bi-speedometer"></i> MOMENTUM
+                        </h6>
+                        <ul class="list-unstyled mb-0">
+                            <li class="mb-2">
+                                <a href="{% url 'technical_analysis:indicator_detail' 'rsi' %}" class="text-decoration-none">
+                                    <i class="bi bi-chevron-right"></i> RSI
+                                </a>
+                            </li>
+                            <li class="mb-2">
+                                <a href="{% url 'technical_analysis:indicator_detail' 'stochastic' %}" class="text-decoration-none">
+                                    <i class="bi bi-chevron-right"></i> Stochastic Oscillator
+                                </a>
+                            </li>
+                            <li class="mb-2">
+                                <a href="{% url 'technical_analysis:indicator_detail' 'cci' %}" class="text-decoration-none">
+                                    <i class="bi bi-chevron-right"></i> CCI
+                                </a>
+                            </li>
+                            <li class="mb-2">
+                                <a href="{% url 'technical_analysis:indicator_detail' 'williams-r' %}" class="text-decoration-none">
+                                    <i class="bi bi-chevron-right"></i> Williams %R
+                                </a>
+                            </li>
+                            <li class="mb-2">
+                                <a href="{% url 'technical_analysis:indicator_detail' 'roc' %}" class="text-decoration-none">
+                                    <i class="bi bi-chevron-right"></i> ROC
+                                </a>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Volatility Indicators -->
+            <div class="col-lg-3 col-md-6 mb-4">
+                <div class="card h-100 shadow-sm border-start border-warning border-4">
+                    <div class="card-body">
+                        <h6 class="card-title text-warning fw-bold mb-3">
+                            <i class="bi bi-activity"></i> VOLATILITY
+                        </h6>
+                        <ul class="list-unstyled mb-0">
+                            <li class="mb-2">
+                                <a href="{% url 'technical_analysis:indicator_detail' 'bollinger-bands' %}" class="text-decoration-none">
+                                    <i class="bi bi-chevron-right"></i> Bollinger Bands
+                                </a>
+                            </li>
+                            <li class="mb-2">
+                                <a href="{% url 'technical_analysis:indicator_detail' 'atr' %}" class="text-decoration-none">
+                                    <i class="bi bi-chevron-right"></i> ATR
+                                </a>
+                            </li>
+                            <li class="mb-2">
+                                <a href="{% url 'technical_analysis:indicator_detail' 'keltner' %}" class="text-decoration-none">
+                                    <i class="bi bi-chevron-right"></i> Keltner Channels
+                                </a>
+                            </li>
+                            <li class="mb-2">
+                                <a href="{% url 'technical_analysis:indicator_detail' 'std-dev' %}" class="text-decoration-none">
+                                    <i class="bi bi-chevron-right"></i> Standard Deviation
+                                </a>
+                            </li>
+                            <li class="mb-2">
+                                <a href="{% url 'technical_analysis:indicator_detail' 'donchian' %}" class="text-decoration-none">
+                                    <i class="bi bi-chevron-right"></i> Donchian Channels
+                                </a>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Volume Indicators -->
+            <div class="col-lg-3 col-md-6 mb-4">
+                <div class="card h-100 shadow-sm border-start border-info border-4">
+                    <div class="card-body">
+                        <h6 class="card-title text-info fw-bold mb-3">
+                            <i class="bi bi-bar-chart"></i> VOLUME
+                        </h6>
+                        <ul class="list-unstyled mb-0">
+                            <li class="mb-2">
+                                <a href="{% url 'technical_analysis:indicator_detail' 'obv' %}" class="text-decoration-none">
+                                    <i class="bi bi-chevron-right"></i> OBV
+                                </a>
+                            </li>
+                            <li class="mb-2">
+                                <a href="{% url 'technical_analysis:indicator_detail' 'vwap' %}" class="text-decoration-none">
+                                    <i class="bi bi-chevron-right"></i> VWAP
+                                </a>
+                            </li>
+                            <li class="mb-2">
+                                <a href="{% url 'technical_analysis:indicator_detail' 'ad-line' %}" class="text-decoration-none">
+                                    <i class="bi bi-chevron-right"></i> A/D Line
+                                </a>
+                            </li>
+                            <li class="mb-2">
+                                <a href="{% url 'technical_analysis:indicator_detail' 'mfi' %}" class="text-decoration-none">
+                                    <i class="bi bi-chevron-right"></i> Money Flow Index
+                                </a>
+                            </li>
+                            <li class="mb-2">
+                                <a href="{% url 'technical_analysis:indicator_detail' 'cmf' %}" class="text-decoration-none">
+                                    <i class="bi bi-chevron-right"></i> Chaikin Money Flow
+                                </a>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Advanced Features -->
+        <h2 class="mb-3 mt-4">
+            <i class="bi bi-stars"></i> Advanced Features
+        </h2>
+        <div class="row">
+
+            <!-- Market Scanner -->
+            <div class="col-lg-4 col-md-6 mb-4">
+                <div class="card h-100 shadow-sm">
+                    <div class="card-body d-flex flex-column">
+                        <h5 class="card-title text-primary">
+                            <i class="bi bi-radar"></i> Market Scanner
+                        </h5>
+                        <p class="card-text">Scan entire NEPSE market for stocks meeting specific technical criteria in real-time.</p>
+                        <a href="{% url 'technical_analysis:market_scanner' %}" class="btn btn-outline-primary mt-auto">
+                            Scan Market
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Watchlist Manager -->
+            <div class="col-lg-4 col-md-6 mb-4">
+                <div class="card h-100 shadow-sm">
+                    <div class="card-body d-flex flex-column">
+                        <h5 class="card-title text-success">
+                            <i class="bi bi-bookmarks"></i> Watchlist Manager
+                        </h5>
+                        <p class="card-text">Create custom watchlists and get alerts when technical conditions are met.</p>
+                        <a href="{% url 'technical_analysis:watchlist' %}" class="btn btn-outline-success mt-auto">
+                            Manage Watchlist
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Alert Center -->
+            <div class="col-lg-4 col-md-6 mb-4">
+                <div class="card h-100 shadow-sm">
+                    <div class="card-body d-flex flex-column">
+                        <h5 class="card-title text-warning">
+                            <i class="bi bi-bell"></i> Alert Center
+                        </h5>
+                        <p class="card-text">Set price alerts, indicator alerts, and get notified when conditions trigger.</p>
+                        <a href="{% url 'technical_analysis:alerts' %}" class="btn btn-outline-warning mt-auto">
+                            Setup Alerts
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sector Analysis -->
+            <div class="col-lg-4 col-md-6 mb-4">
+                <div class="card h-100 shadow-sm">
+                    <div class="card-body d-flex flex-column">
+                        <h5 class="card-title text-info">
+                            <i class="bi bi-layers"></i> Sector Analysis
+                        </h5>
+                        <p class="card-text">Compare technical strength across different NEPSE sectors and industries.</p>
+                        <a href="{% url 'technical_analysis:sector_analysis' %}" class="btn btn-outline-info mt-auto">
+                            Analyze Sectors
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Strategy Builder -->
+            <div class="col-lg-4 col-md-6 mb-4">
+                <div class="card h-100 shadow-sm">
+                    <div class="card-body d-flex flex-column">
+                        <h5 class="card-title text-danger">
+                            <i class="bi bi-cpu"></i> Strategy Builder
+                        </h5>
+                        <p class="card-text">Create custom trading strategies by combining multiple indicators and conditions.</p>
+                        <a href="{% url 'technical_analysis:strategy_builder' %}" class="btn btn-outline-danger mt-auto">
+                            Build Strategy
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Performance Dashboard -->
+            <div class="col-lg-4 col-md-6 mb-4">
+                <div class="card h-100 shadow-sm">
+                    <div class="card-body d-flex flex-column">
+                        <h5 class="card-title text-secondary">
+                            <i class="bi bi-trophy"></i> Performance Tracker
+                        </h5>
+                        <p class="card-text">Track your trading performance, win rate, and compare against market benchmarks.</p>
+                        <a href="{% url 'technical_analysis:performance' %}" class="btn btn-outline-secondary mt-auto">
+                            View Performance
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Quick Info Section -->
+        <hr class="my-5">
+        
+        <div class="p-5 mb-4 bg-white rounded-3 shadow-sm border">
+            <div class="container-fluid py-3">
+                <h2 class="display-6 fw-bold">
+                    <i class="bi bi-info-circle text-primary"></i> Getting Started with Technical Analysis
+                </h2>
+                <p class="fs-5 text-muted mb-4">Follow these steps to start using technical analysis tools effectively:</p>
+                
+                <div class="row">
+                    <div class="col-md-4 mb-3">
+                        <div class="d-flex">
+                            <div class="flex-shrink-0">
+                                <div class="bg-primary text-white rounded-circle d-flex align-items-center justify-content-center" style="width: 40px; height: 40px;">
+                                    <strong>1</strong>
+                                </div>
+                            </div>
+                            <div class="flex-grow-1 ms-3">
+                                <h5>Choose Your Stocks</h5>
+                                <p class="text-muted">Use the stock screener to find stocks that match your technical criteria.</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="col-md-4 mb-3">
+                        <div class="d-flex">
+                            <div class="flex-shrink-0">
+                                <div class="bg-success text-white rounded-circle d-flex align-items-center justify-content-center" style="width: 40px; height: 40px;">
+                                    <strong>2</strong>
+                                </div>
+                            </div>
+                            <div class="flex-grow-1 ms-3">
+                                <h5>Analyze Charts</h5>
+                                <p class="text-muted">View interactive charts with indicators to understand price movements.</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="col-md-4 mb-3">
+                        <div class="d-flex">
+                            <div class="flex-shrink-0">
+                                <div class="bg-warning text-white rounded-circle d-flex align-items-center justify-content-center" style="width: 40px; height: 40px;">
+                                    <strong>3</strong>
+                                </div>
+                            </div>
+                            <div class="flex-grow-1 ms-3">
+                                <h5>Monitor Signals</h5>
+                                <p class="text-muted">Set up alerts and track trading signals for your watchlist stocks.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="text-center mt-4">
+                    <a href="{% url 'technical_analysis:tutorial' %}" class="btn btn-primary btn-lg">
+                        <i class="bi bi-book"></i> View Tutorial
+                    </a>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+{% endblock %}
