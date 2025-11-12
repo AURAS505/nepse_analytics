@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+
+{% block title %}Edit Transaction{% endblock %}
+
+{% block title_header %}<i class="bi bi-pencil"></i> Edit Transaction{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header">
+                <h4 class="mb-0"><i class="bi bi-pencil"></i> Edit Transaction</h4>
+            </div>
+            <div class="card-body p-4">
+                <form method="POST">
+                    {% csrf_token %}
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="date" class="form-label">Date <span class="text-danger">*</span></label>
+                            <input type="date" class="form-control" id="date" name="date" 
+                                   value="{{ transaction.date|date:'Y-m-d' }}" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="symbol" class="form-label">Symbol <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="symbol" name="symbol" 
+                                   value="{{ transaction.symbol.script_ticker }}" required list="symbolList" autocomplete="off">
+                            <datalist id="symbolList">
+                                {% for company in companies %}
+                                <option value="{{ company.script_ticker }}">{{ company.company_name }}</option>
+                                {% endfor %}
+                            </datalist>
+                        </div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="script" class="form-label">Script / Company Name</label>
+                            <input type="text" class="form-control" id="script" name="script" 
+                                   value="{{ transaction.script }}" readonly>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="sector" class="form-label">Sector</label>
+                            <input type="text" class="form-control" id="sector" name="sector" 
+                                   value="{{ transaction.sector }}" readonly>
+                        </div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="transaction_type" class="form-label">Transaction Type <span class="text-danger">*</span></label>
+                            <select class="form-select" id="transaction_type" name="transaction_type" required>
+                                {% for value, display in transaction.TransactionType.choices %}
+                                <option value="{{ value }}" {% if transaction.transaction_type == value %}selected{% endif %}>{{ display }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="kitta" class="form-label">Kitta (Shares) <span class="text-danger">*</span></label>
+                            <input type="number" class="form-control" id="kitta" name="kitta" 
+                                   value="{{ transaction.kitta }}" min="1" required>
+                        </div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="billed_amount" class="form-label">Billed Amount</label>
+                            <input type="number" class="form-control" id="billed_amount" name="billed_amount" 
+                                   value="{{ transaction.billed_amount|default:'' }}" step="0.01">
+                        </div>
+                        <div class="col-md-6">
+                            <label for="rate" class="form-label">Rate (Auto-calculated)</label>
+                            <input type="text" class="form-control" id="rate" name="rate" 
+                                   value="{{ transaction.rate|default:'' }}" readonly>
+                        </div>
+                    </div>
+
+                    <div class="mb-4">
+                        <label for="broker" class="form-label">Broker Number</label>
+                        <input type="text" class="form-control" id="broker" name="broker" 
+                               value="{{ transaction.broker|default:'' }}">
+                    </div>
+
+                    <div class="d-grid gap-2 d-md-flex justify-content-md-end">
+                        <a href="{% url 'my_portfolio:transactions' %}" class="btn btn-secondary">
+                            <i class="bi bi-x-circle"></i> Cancel
+                        </a>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-check-circle"></i> Update Transaction
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    document.getElementById('symbol').addEventListener('input', async function() {
+        const symbol = this.value.trim().toUpperCase();
+        
+        if (symbol.length >= 2) {
+            try {
+                const response = await fetch(`{% url 'my_portfolio:api_company_details' 'SYMBOL' %}`.replace('SYMBOL', symbol));
+                if (response.ok) {
+                    const data = await response.json();
+                    document.getElementById('script').value = data.company_name;
+                    document.getElementById('sector').value = data.sector;
+                } else {
+                    document.getElementById('script').value = '';
+                    document.getElementById('sector').value = '';
+                }
+            } catch (error) {
+                console.error('Error fetching company details:', error);
+            }
+        }
+    });
+
+    function calculateRate() {
+        const kitta = parseFloat(document.getElementById('kitta').value) || 0;
+        const billedAmount = parseFloat(document.getElementById('billed_amount').value) || 0;
+        
+        if (kitta > 0 && billedAmount > 0) {
+            const rate = (billedAmount / kitta).toFixed(2);
+            document.getElementById('rate').value = rate;
+        } else {
+            document.getElementById('rate').value = '';
+        }
+    }
+
+    document.getElementById('kitta').addEventListener('input', calculateRate);
+    document.getElementById('billed_amount').addEventListener('input', calculateRate);
+</script>
+{% endblock %}

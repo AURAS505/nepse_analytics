@@ -1,0 +1,228 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}Dashboard - Stock Portfolio Manager{% endblock %}
+
+{% block title_header %}
+<i class="bi bi-graph-up-arrow"></i> Stock Portfolio Manager
+{# --- REMOVED LINK TO company_management --- #}
+{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card card-body p-5">
+            <h1 class="display-4 fw-bold mb-3">
+                <i class="bi bi-graph-up-arrow"></i> Welcome!
+            </h1>
+            <p class="lead mb-4">Track your investments, manage transactions, and monitor your portfolio performance.</p>
+            <div class="d-flex gap-3 flex-wrap">
+                <a href="{% url 'my_portfolio:transactions' %}" class="btn btn-primary btn-lg">
+                    <i class="bi bi-plus-circle"></i> Add Transaction
+                </a>
+                <a href="{% url 'my_portfolio:company_dashboard' %}" class="btn btn-outline-secondary btn-lg">
+                    <i class="bi bi-pie-chart"></i> View Portfolio Report
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-4 mb-4">
+    <div class="col-md-3">
+        <div class="card h-100 shadow-sm">
+            <div class="card-body text-center p-4">
+                <div class="mb-3">
+                    <i class="bi bi-building text-primary" style="font-size: 3rem;"></i>
+                </div>
+                <h3 class="fw-bold text-primary">{{ stats.total_companies|intcomma }}</h3>
+                <p class="text-muted mb-0">Companies</p>
+                {# --- UPDATED: Link to main admin or another app --- #}
+                <a href="/admin/listed_companies/companies/" class="btn btn-sm btn-outline-primary mt-3" target="_blank">
+                    View List <i class="bi bi-arrow-right"></i>
+                </a>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3">
+        <div class="card h-100 shadow-sm">
+            <div class="card-body text-center p-4">
+                <div class="mb-3">
+                    <i class="bi bi-list-ul text-success" style="font-size: 3rem;"></i>
+                </div>
+                <h3 class="fw-bold text-success">{{ stats.total_transactions|intcomma }}</h3>
+                <p class="text-muted mb-0">Transactions</p>
+                <a href="{% url 'my_portfolio:transactions' %}" class="btn btn-sm btn-outline-success mt-3">
+                    View All <i class="bi bi-arrow-right"></i>
+                </a>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3">
+        <div class="card h-100 shadow-sm">
+            <div class="card-body text-center p-4">
+                <div class="mb-3">
+                    <i class="bi bi-briefcase text-warning" style="font-size: 3rem;"></i>
+                </div>
+                <h3 class="fw-bold text-warning">{{ stats.total_holdings|intcomma }}</h3>
+                <p class="text-muted mb-0">Holdings</p>
+                <a href="{% url 'my_portfolio:company_dashboard' %}" class="btn btn-sm btn-outline-warning mt-3">
+                    Details <i class="bi bi-arrow-right"></i>
+                </a>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3">
+        <div class="card h-100 shadow-sm">
+            <div class="card-body text-center p-4">
+                <div class="mb-3">
+                    <i class="bi bi-cash-stack text-info" style="font-size: 3rem;"></i>
+                </div>
+                <h3 class="fw-bold text-info">Rs. {{ stats.total_investment|floatformat:0|intcomma }}</h3>
+                <p class="text-muted mb-0">Total Investment</p>
+                <small class="text-muted">Net Position</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-12">
+        <div class="card shadow-sm">
+            <div class="card-header d-flex justify-content-between align-items-center py-3">
+                <h5 class="mb-0">
+                    <i class="bi bi-clock-history text-primary"></i> Recent Transactions
+                </h5>
+                <a href="{% url 'my_portfolio:transactions' %}" class="btn btn-sm btn-outline-primary">
+                    View All <i class="bi bi-arrow-right"></i>
+                </a>
+            </div>
+            <div class="card-body p-0">
+                {% if stats.recent_transactions %}
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Date</th>
+                                <th>Symbol</th>
+                                <th>Company</th>
+                                <th>Type</th>
+                                <th class="text-end">Kitta</th>
+                                <th class="text-end">Amount</th>
+                                <th class="text-end">Rate</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for txn in stats.recent_transactions %}
+                            <tr>
+                                <td>{{ txn.date|date:"Y-m-d" }}</td>
+                                <td><strong class="text-primary">{{ txn.symbol.script_ticker }}</strong></td>
+                                <td>{{ txn.script }}</td>
+                                <td>
+                                    {% if txn.transaction_type == 'BUY' %}
+                                        <span class="badge bg-success">BUY</span>
+                                    {% elif txn.transaction_type == 'SALE' %}
+                                        <span class="badge bg-danger">SALE</span>
+                                    {% elif txn.transaction_type == 'BONUS' %}
+                                        <span class="badge bg-info">BONUS</span>
+                                    {% elif txn.transaction_type == 'Balance b/d' %}
+                                        <span class="badge bg-secondary">Balance b/d</span>
+                                    {% else %}
+                                        <span class="badge bg-warning text-dark">{{ txn.transaction_type }}</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-end">{{ txn.kitta|intcomma }}</td>
+                                <td class="text-end">
+                                    {% if txn.billed_amount %}
+                                        Rs. {{ txn.billed_amount|floatformat:2|intcomma }}
+                                    {% else %}
+                                        -
+                                    {% endif %}
+                                </td>
+                                <td class="text-end">
+                                    {% if txn.rate %}
+                                        Rs. {{ txn.rate|floatformat:2|intcomma }}
+                                    {% else %}
+                                        -
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="text-center py-5">
+                    <i class="bi bi-inbox text-muted" style="font-size: 4rem;"></i>
+                    <h5 class="text-muted mt-3">No transactions yet</h5>
+                    <p class="text-muted">Start by adding your first transaction</p>
+                    <a href="{% url 'my_portfolio:transactions' %}" class="btn btn-primary mt-2">
+                        <i class="bi bi-plus-circle"></i> Add Transaction
+                    </a>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card shadow-sm">
+            <div class="card-body p-4">
+                <h5 class="mb-4"><i class="bi bi-lightning-charge text-warning"></i> Quick Actions</h5>
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <a href="{% url 'my_portfolio:transactions' %}" class="btn btn-outline-primary w-100 py-3">
+                            <i class="bi bi-plus-circle d-block mb-2" style="font-size: 2rem;"></i>
+                            Add Transaction
+                        </a>
+                    </div>
+                    <div class="col-md-4">
+                        <a href="{% url 'my_portfolio:transactions' %}" class="btn btn-outline-success w-100 py-3">
+                            <i class="bi bi-list-ul d-block mb-2" style="font-size: 2rem;"></i>
+                            View Transactions
+                        </a>
+                    </div>
+                    <div class="col-md-4">
+                        <a href="{% url 'my_portfolio:company_dashboard' %}" class="btn btn-outline-info w-100 py-3">
+                            <i class="bi bi-pie-chart d-block mb-2" style="font-size: 2rem;"></i>
+                            Portfolio Report
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if stats.total_transactions == 0 %}
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card shadow-sm bg-light">
+            <div class="card-body p-4">
+                <h5 class="mb-3"><i class="bi bi-rocket text-primary"></i> Getting Started</h5>
+                <p class="mb-3">Follow these steps to set up your portfolio:</p>
+                <ol class="mb-0">
+                    <li class="mb-2">
+                        <strong>Add Companies</strong> - Go to <a href="/admin/listed_companies/companies/" target="_blank">Company Admin</a> 
+                        to ensure your scripts are listed.
+                    </li>
+                    <li class="mb-2">
+                        <strong>Add Transactions</strong> - Click <a href="{% url 'my_portfolio:transactions' %}">Add Transaction</a> 
+                        to record your buy/sell activities
+                    </li>
+                    <li>
+                        <strong>View Portfolio</strong> - Check your <a href="{% url 'my_portfolio:company_dashboard' %}">Portfolio Report</a> 
+                        to see your current holdings and investments
+                    </li>
+                </ol>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,448 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}All Transactions{% endblock %}
+
+{% block title_header %}<i class="bi bi-list-ul"></i> All Transactions{% endblock %}
+
+{% block content %}
+<div class="card shadow-sm">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h4 class="mb-0"><i class="bi bi-list-ul"></i> All Transactions</h4>
+        <div class="btn-group">
+            <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#uploadTransactionsModal">
+                <i class="bi bi-cloud-upload"></i> Upload CSV/Excel
+            </button>
+            <button type="button" class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#deleteAllModal">
+                <i class="bi bi-trash"></i> Delete All
+            </button>
+        </div>
+    </div>
+    <div class="card-body">
+
+        {% if messages %}
+            {% for message in messages %}
+            <div class="alert {% if message.tags %}alert-{{ message.tags }}{% else %}alert-info{% endif %} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+            {% endfor %}
+        {% endif %}
+
+        <div id="alertContainer"></div>
+        
+        <datalist id="symbolList">
+            {% for company in companies %}
+            <option value="{{ company.script_ticker }}">{{ company.company_name }}</option>
+            {% endfor %}
+        </datalist>
+
+        <span id="django-urls"
+            data-api-company-details="{% url 'my_portfolio:api_company_details' 'SYMBOL_PLACEHOLDER' %}"
+            data-transaction-delete="{% url 'my_portfolio:transaction_delete' 'ID_PLACEHOLDER' %}"
+            style="display: none;">
+        </span>
+
+        <div class="table-responsive">
+            <table class="table table-hover table-striped" id="transactionsTable">
+                <thead class="table-light" style="border-bottom: 2px solid #dee2e6;">
+                    <tr>
+                        <th style="width: 12%;">Unique ID</th> 
+                        <th>Date</th>
+                        <th>Symbol</th>
+                        <th>Company / Sector</th>
+                        <th>Type</th>
+                        <th class="text-end">Kitta</th>
+                        <th class="text-end">Amount</th>
+                        <th class="text-end">Rate</th>
+                        <th>Broker</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr class="table-light">
+                        <td class="text-center">
+                            <span class="badge bg-info text-dark">NEW</span>
+                        </td>
+                        <td>
+                            <input type="date" class="form-control form-control-sm" id="new_date" name="date" required>
+                        </td>
+                        <td>
+                            <input type="text" class="form-control form-control-sm" id="new_symbol" name="symbol" 
+                                   placeholder="Symbol" required list="symbolList" autocomplete="off">
+                        </td>
+                        <td>
+                            <input type="text" class="form-control form-control-sm" id="new_script" name="script" readonly placeholder="Company Name">
+                            <input type="text" class="form-control form-control-sm fst-italic text-muted" id="new_sector" name="sector" readonly placeholder="Sector">
+                        </td>
+                        <td>
+                            <select class="form-select form-select-sm" id="new_transaction_type" name="transaction_type" required>
+                                <option value="">Select...</option>
+                                {% for value, display in transaction_choices %}
+                                    <option value="{{ value }}">{{ display }}</option>
+                                {% endfor %}
+                            </select>
+                        </td>
+                        <td>
+                            <input type="number" class="form-control form-control-sm text-end" id="new_kitta" name="kitta" 
+                                   min="1" required placeholder="Shares">
+                        </td>
+                        <td>
+                            <input type="number" class="form-control form-control-sm text-end" id="new_billed_amount" name="billed_amount" 
+                                   step="0.01" placeholder="Total">
+                        </td>
+                        <td>
+                            <input type="text" class="form-control form-control-sm text-end" id="new_rate" name="rate" readonly placeholder="Rate">
+                        </td>
+                        <td>
+                            <input type="text" class="form-control form-control-sm" id="new_broker" name="broker" 
+                                   placeholder="e.g., 35">
+                        </td>
+                        <td class="text-center">
+                            <button type="button" id="addNewTransactionBtn" class="btn btn-sm btn-success">
+                                <i class="bi bi-plus-circle"></i> Add
+                            </button>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <hr class="my-4">
+        
+        {% if transactions %}
+        <h5 class="mb-3">Transaction History</h5>
+        <div class="mb-3">
+            <input type="text" id="searchInput" class="form-control" placeholder="Search by symbol, company, sector, or type...">
+        </div>
+        
+        <div class="table-responsive">
+            <table class="table table-hover table-striped" id="transactionsHistoryTable"> 
+                <thead class="table-light" style="border-bottom: 2px solid #dee2e6;">
+                    <tr>
+                        <th style="width: 12%;">Unique ID</th> 
+                        <th>Date</th>
+                        <th>Symbol</th>
+                        <th>Company / Sector</th>
+                        <th>Type</th>
+                        <th class="text-end">Kitta</th>
+                        <th class="text-end">Amount</th>
+                        <th class="text-end">Rate</th>
+                        <th>Broker</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for txn in transactions %}
+                    <tr>
+                        <td><span class="badge bg-secondary" style="font-size: 0.75em;">{{ txn.unique_id }}</span></td>
+                        <td>{{ txn.date|date:"Y-m-d" }}</td>
+                        <td><strong>{{ txn.symbol.script_ticker }}</strong></td>
+                        <td>
+                            {{ txn.script }}
+                            <br>
+                            <small class="fst-italic text-muted">{{ txn.sector }}</small>
+                        </td>
+                        <td>
+                            <span class="badge bg-{{ txn.transaction_type|lower|slugify }}">{{ txn.transaction_type }}</span>
+                        </td>
+                        <td class="text-end">{{ txn.kitta|intcomma }}</td>
+                        <td class="text-end">
+                            {% if txn.billed_amount is not None %}
+                                {{ txn.billed_amount|floatformat:2|intcomma }}
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        <td class="text-end">
+                            {% if txn.rate is not None %}
+                                {{ txn.rate|floatformat:2|intcomma }}
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        <td>{{ txn.broker|default:'-' }}</td>
+                        <td>
+                            <div class="btn-group btn-group-sm" role="group">
+                                <a href="{% url 'my_portfolio:transaction_edit' unique_id=txn.unique_id %}" 
+                                   class="btn btn-outline-primary" title="Edit">
+                                    <i class="bi bi-pencil"></i>
+                                </a>
+                                <button type="button" class="btn btn-outline-danger" 
+                                        onclick="deleteTransaction('{{ txn.unique_id }}')" title="Delete">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="mt-3">
+            <p class="text-muted">Total Transactions: <strong>{{ transactions|length }}</strong></p>
+        </div>
+        {% else %}
+         <div class="alert alert-info text-center">
+            <i class="bi bi-info-circle"></i> No transactions found. Add your first transaction above!
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="modal fade" id="deleteModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Confirm Delete</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                Are you sure you want to delete this transaction? This action cannot be undone.
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <form id="deleteForm" method="POST" style="display: inline;">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-danger">Delete</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="deleteAllModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title text-danger"><i class="bi bi-exclamation-triangle-fill"></i> Confirm Delete All</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Are you absolutely sure you want to delete **ALL** transactions? This will wipe your entire transaction history and cannot be undone.</p>
+                <p class="fw-bold text-danger">This action is irreversible.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <form action="{% url 'my_portfolio:transaction_delete_all' %}" method="POST" style="display: inline;">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-danger">Yes, Delete All</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="uploadTransactionsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-cloud-upload"></i> Upload Transactions</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form action="{% url 'my_portfolio:transaction_upload' %}" method="POST" enctype="multipart/form-data">
+                {% csrf_token %}
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Select CSV or Excel File</label>
+                        <input type="file" name="file" class="form-control" accept=".csv,.xlsx,.xls" required>
+                    </div>
+                    
+                    <div class="alert alert-info">
+                        <h6 class="alert-heading"><i class="bi bi-info-circle"></i> Required Columns:</h6>
+                        <ul class="mb-0">
+                            <li><strong>Date</strong> - Transaction date (YYYY-MM-DD format)</li>
+                            <li><strong>Symbol</strong> - Company ticker (must exist in companies database)</li>
+                            <li><strong>Transaction Type</strong> - One of:{% for value, display in transaction_choices %}{{ value }}{% if not forloop.last %}, {% endif %}{% endfor %}</li>
+                            <li><strong>Kitta</strong> - Number of shares</li>
+                            <li><strong>Billed Amount</strong> - Total amount (can be empty for BONUS)</li>
+                            <li><strong>Broker</strong> - Broker number (optional)</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="card">
+                        <div class="card-header">
+                            <strong><a href="{% url 'my_portfolio:download_transaction_template' file_type='csv' %}">Download Sample CSV Template</a></strong>
+                            |
+                            <strong><a href="{% url 'my_portfolio:download_transaction_template' file_type='excel' %}">Download Sample Excel Template</a></strong>
+                        </div>
+                        <div class="card-body">
+                            <pre class="mb-0"><code>Date,Symbol,Transaction Type,Kitta,Billed Amount,Broker
+2025-07-16,CGH,Balance b/d,7570,8062958.40,35
+2025-07-17,HBL,BUY,11050,2761399.28,35
+2025-07-17,BARUN,SALE,10000,4156963.36,89
+2025-07-17,PRIN,BONUS,4319,,</code></pre>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="submit" class="btn btn-success">
+                        <i class="bi bi-cloud-upload"></i> Upload
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // --- CSRF Token for AJAX ---
+    function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
+    const csrftoken = getCookie('csrftoken');
+    
+    // --- NEW: Get URLs from our hidden span ---
+    const urlSpan = document.getElementById('django-urls');
+    const companyApiUrlBase = urlSpan.dataset.apiCompanyDetails;
+    const transactionDeleteUrlBase = urlSpan.dataset.transactionDelete;
+    // --- END NEW ---
+
+
+    // --- ADD TRANSACTION ROW LOGIC ---
+
+    // Set today's date on the new row
+    document.addEventListener('DOMContentLoaded', function() {
+        flatpickr("#new_date", {
+            dateFormat: "Y-m-d",
+            defaultDate: "today",
+            maxDate: "today"
+        });
+    });
+
+    // Auto-fill company details for the new row
+    document.getElementById('new_symbol').addEventListener('input', async function() {
+        const symbol = this.value.trim().toUpperCase();
+        
+        if (symbol.length >= 2) {
+            try {
+                // --- FIXED: Use the URL from our span ---
+                const fetchUrl = companyApiUrlBase.replace('SYMBOL_PLACEHOLDER', symbol);
+                
+                const response = await fetch(fetchUrl);
+                if (response.ok) {
+                    const data = await response.json();
+                    document.getElementById('new_script').value = data.company_name;
+                    document.getElementById('new_sector').value = data.sector;
+                } else {
+                    document.getElementById('new_script').value = '';
+                    document.getElementById('new_sector').value = '';
+                }
+            } catch (error) {
+                console.error('Error fetching company details:', error);
+            }
+        }
+    });
+
+    // Auto-calculate rate for the new row
+    function calculateRate() {
+        const kitta = parseFloat(document.getElementById('new_kitta').value) || 0;
+        const billedAmount = parseFloat(document.getElementById('new_billed_amount').value) || 0;
+        
+        if (kitta > 0 && billedAmount > 0) {
+            const rate = (billedAmount / kitta).toFixed(2);
+            document.getElementById('new_rate').value = rate;
+        } else {
+            document.getElementById('new_rate').value = '';
+        }
+    }
+
+    document.getElementById('new_kitta').addEventListener('input', calculateRate);
+    document.getElementById('new_billed_amount').addEventListener('input', calculateRate);
+
+    // Form submission for the new row
+    document.getElementById('addNewTransactionBtn').addEventListener('click', async function(e) {
+        e.preventDefault();
+        
+        const alertContainer = document.getElementById('alertContainer');
+        
+        const formData = new FormData();
+        formData.append('date', document.getElementById('new_date').value);
+        formData.append('symbol', document.getElementById('new_symbol').value);
+        formData.append('transaction_type', document.getElementById('new_transaction_type').value);
+        formData.append('kitta', document.getElementById('new_kitta').value);
+        formData.append('billed_amount', document.getElementById('new_billed_amount').value);
+        formData.append('broker', document.getElementById('new_broker').value);
+
+        try {
+            const response = await fetch("{% url 'my_portfolio:transactions' %}", {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': csrftoken, 
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                body: formData
+            });
+            
+            const result = await response.json();
+            
+            if (response.ok) {
+                alertContainer.innerHTML = `
+                    <div class="alert alert-success alert-dismissible fade show" role="alert">
+                        <i class="bi bi-check-circle"></i> ${result.message}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                `;
+                
+                setTimeout(() => {
+                    window.location.href = "{% url 'my_portfolio:transactions' %}";
+                }, 1500);
+            } else {
+                alertContainer.innerHTML = `
+                    <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                        <i class="bi bi-exclamation-triangle"></i> ${result.message}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                `;
+            }
+        } catch (error) {
+            alertContainer.innerHTML = `
+                <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                    <i class="bi bi-exclamation-triangle"></i> An error occurred. Please try again.
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            `;
+        }
+    });
+
+    // --- TRANSACTION LIST LOGIC ---
+
+    // Search functionality
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) {
+        searchInput.addEventListener('keyup', function() {
+            const searchValue = this.value.toLowerCase();
+            const rows = document.querySelectorAll('#transactionsHistoryTable tbody tr');
+            
+            rows.forEach(row => {
+                const text = row.textContent.toLowerCase();
+                row.style.display = text.includes(searchValue) ? '' : 'none';
+            });
+        });
+    }
+
+    // Delete transaction
+    function deleteTransaction(uniqueId) {
+        const deleteModal = new bootstrap.Modal(document.getElementById('deleteModal'));
+        const deleteForm = document.getElementById('deleteForm');
+        // --- FIXED: Use the URL from our span ---
+        deleteForm.action = transactionDeleteUrlBase.replace('ID_PLACEHOLDER', uniqueId);
+        deleteModal.show();
+    }
+</script>
+{% endblock %}

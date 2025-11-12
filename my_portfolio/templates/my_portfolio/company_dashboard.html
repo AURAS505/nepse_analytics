@@ -1,0 +1,401 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}Portfolio Report{% endblock %}
+{% block title_header %}<i class="bi bi-bar-chart"></i> Portfolio Report{% endblock %}
+
+{% block content %}
+<div class="card shadow-sm mb-4 border-0">
+  <div class="card-body bg-light-subtle">
+    <form id="stockLookupForm" method="GET" action="{% url 'my_portfolio:company_dashboard' %}" class="d-flex flex-wrap justify-content-between align-items-center gap-3">
+      <div>
+        <h5 class="fw-semibold text-primary mb-1">Portfolio Report</h5>
+        {% if company %}
+          <div class="text-muted small">
+            <strong>{{ company.symbol }}</strong> — {{ company.script }} <span class="badge bg-info-subtle text-dark ms-2">{{ company.sector }}</span>
+          </div>
+        {% else %}
+          <small class="text-muted">Select a symbol to view report</small>
+        {% endif %}
+      </div>
+
+      <div class="d-flex" style="min-width: 320px;">
+        <input class="form-control me-2 border-primary" list="holdingsDatalist" id="symbol" name="symbol"
+          placeholder="Type symbol..." value="{{ current_symbol|default:'' }}"
+          oninput="this.value = this.value.toUpperCase()" required>
+        
+        <datalist id="holdingsDatalist">
+          {% for item in holdings_list %}
+            <option value="{{ item.symbol }}">{{ item.script }}</option>
+          {% endfor %}
+        </datalist>
+        
+        <button type="submit" class="btn btn-primary" title="Load Report"><i class="bi bi-search"></i></button>
+        <a href="{% url 'my_portfolio:company_dashboard' %}" class="btn btn-outline-secondary ms-1" title="Clear Report"><i class="bi bi-x-lg"></i></a>
+        
+        <button type="button" class="btn btn-info ms-1" data-bs-toggle="modal" data-bs-target="#holdingsListModal" title="View All Holdings">
+            <i class="bi bi-list-task"></i>
+        </button>
+
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="row g-4">
+  
+  <div class="col-lg-9">
+    {% if summary and company %}
+    <div class="card shadow-sm border-0 h-100">
+      <div class="card-header bg-primary-subtle fw-semibold text-dark">
+        <i class="bi bi-list-columns"></i> Transaction Details
+      </div>
+      <div class="table-responsive">
+        <table class="table table-hover table-striped table-bordered table-sm mb-0 align-middle" style="font-size: 0.95rem;">
+          <thead class="table-primary text-center">
+            <tr>
+              <th>Unique ID</th>
+              <th>Date</th>
+              <th>Type</th>
+              <th>Kitta</th>
+              <th>Amount</th>
+              <th>Rate</th>
+              <th>R. Profit</th>
+              <th>Broker</th>
+              <th>C. Bal</th>
+              <th>C. Rate</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% if details %}
+              {% for row in details|dictsortreversed:"date" %}
+                <tr class="{% if row.is_buy %}table-success-subtle{% elif row.is_sale %}table-danger-subtle{% endif %}">
+                  <td><span class="badge bg-secondary">{{ row.unique_id }}</span></td>
+                  <td>{{ row.date|date:"Y-m-d" }}</td>
+                  <td>{{ row.type }}</td>
+                  <td class="text-end">{{ row.p_qty|add:row.s_qty|intcomma }}</td>
+                  <td class="text-end">{{ row.p_amount|add:row.s_amount|floatformat:2|intcomma }}</td>
+                  <td class="text-end">{{ row.p_rate|add:row.s_rate|floatformat:2|intcomma }}</td>
+                  <td class="text-end {% if row.profit > 0 %}text-success{% elif row.profit < 0 %}text-danger{% endif %}">
+                    {{ row.profit|floatformat:2|intcomma }}
+                  </td>
+                  <td class="text-center">{{ row.broker|default:'-' }}</td>
+                  <td class="text-end fw-semibold">{{ row.cl_qty|intcomma }}</td>
+                  <td class="text-end fw-semibold">{{ row.cl_rate|floatformat:2|intcomma }}</td>
+                </tr>
+              {% endfor %}
+            {% else %}
+              <tr><td colspan="10" class="text-center text-muted py-4"><i class="bi bi-inbox"></i> No transaction data found.</td></tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    {% elif current_symbol %}
+    <div class="alert alert-warning text-center mt-4">
+      <h5>No Data Found</h5>
+      <p>No transactions found for <strong>{{ current_symbol }}</strong>.</p>
+    </div>
+    {% else %}
+    <div class="alert alert-info text-center mt-4">
+      <h5>Welcome to the Portfolio Report</h5>
+      <p>Enter or select a stock symbol from the list to view its detailed report.</p>
+    </div>
+    {% endif %}
+  </div> 
+
+  <div class="col-lg-3">
+    <div class="d-flex flex-column gap-4">
+      
+      {% if summary and company %}
+      <div class="card border-0">
+        <div class="card-header bg-info-subtle fw-semibold text-dark">
+          <i class="bi bi-cash-stack"></i> Cost Summary
+        </div>
+        <div class="card-body p-0">
+          <table class="table table-sm align-middle mb-0" style="font-size: 0.9em;">
+            <thead class="table-light">
+              <tr>
+                <th>Details</th>
+                <th class="text-end">Kitta</th>
+                <th class="text-end">Amount</th>
+                <th class="text-end">Rate</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="fw-bold table-primary">
+                <td>Closing Bal.</td>
+                <td class="text-end">{{ summary.closing_qty|intcomma }}</td>
+                <td class="text-end">{{ summary.closing_total_cost|floatformat:2|intcomma }}</td>
+                <td class="text-end">{{ summary.closing_avg_rate|floatformat:2|intcomma }}</td>
+              </tr>
+              <tr>
+                <td>Purchase</td>
+                <td class="text-end text-success">{{ summary.total_purchase_kitta|intcomma }}</td>
+                <td class="text-end text-success">{{ summary.total_purchase|floatformat:2|intcomma }}</td>
+                <td class="text-end text-success">{{ summary.total_purchase_rate|floatformat:2|intcomma }}</td>
+              </tr>
+              <tr>
+                <td>Sales</td>
+                <td class="text-end text-danger">{{ summary.total_sales_kitta|intcomma }}</td>
+                <td class="text-end text-danger">{{ summary.total_sales|floatformat:2|intcomma }}</td>
+                <td class="text-end text-danger">{{ summary.total_sales_rate|floatformat:2|intcomma }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card border-0">
+        <div class="card-header bg-success-subtle fw-semibold text-dark">
+          <i class="bi bi-graph-up"></i> Profit & Loss
+        </div>
+        <div class="card-body" style="font-size: 0.9em;">
+          <div class="d-flex justify-content-between mb-2">
+            <span>Realized P/L</span>
+            <span class="fw-bold {% if summary.realized_pl >= 0 %}text-success{% else %}text-danger{% endif %}">
+              Rs. {{ summary.realized_pl|floatformat:2|intcomma }}
+            </span>
+          </div>
+
+          <div class="bg-light rounded p-2 mb-3">
+            <small class="text-muted">
+              Unrealized P/L
+              {% if summary.latest_close_price %}
+                <span>(LTP @ {{ summary.latest_close_price|floatformat:2|intcomma }})</span>
+              {% endif %}
+            </small>
+            <div class="input-group input-group-sm mt-2">
+              <span class="input-group-text bg-info-subtle">Rs.</span>
+              <input type="number" step="0.01" id="marketPrice" class="form-control"
+                value="{{ summary.latest_close_price|default:'' }}">
+              <button class="btn btn-outline-info" type="button" onclick="calculateUnrealized()">Calc</button>
+            </div>
+            <div class="text-end mt-2 fw-bold text-info" id="unrealizedPL" style="font-size: 1.1em;">Rs. 0.00</div>
+          </div>
+
+          <hr class="my-2">
+          <div class="d-flex justify-content-between align-items-center">
+            <span>Total P/L</span>
+            <h5 class="fw-bold text-primary mb-0" id="totalPL">Rs. 0.00</h5>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
+      <div class="card border-0 shadow-sm">
+        <div class="card-header bg-dark text-white fw-semibold">
+          <i class="bi bi-pie-chart-fill"></i> Overall Portfolio
+        </div>
+        <div class="card-body">
+          <div class="d-flex justify-content-between mb-2">
+            <span class="text-muted" style="font-size: 0.9em;">Book Value</span>
+            <span class="fw-bold" style="font-size: 0.9em;">Rs. {{ overall_stats.book_value|floatformat:2|intcomma }}</span>
+          </div>
+          <div class="d-flex justify-content-between mb-2">
+            <span class="text-muted" style="font-size: 0.9em;">Market Value</span>
+            <span class="fw-bold" style="font-size: 0.9em;">Rs. {{ overall_stats.market_value|floatformat:2|intcomma }}</span>
+          </div>
+          <hr>
+          <div class="d-flex justify-content-between mb-2">
+            <span class="text-muted" style="font-size: 0.9em;">Realized P/L</span>
+            <span class="fw-bold" style="font-size: 0.9em; {% if overall_stats.realized_pl >= 0 %}color: var(--bs-success);{% else %}color: var(--bs-danger);{% endif %}">
+              Rs. {{ overall_stats.realized_pl|floatformat:2|intcomma }}
+            </span>
+          </div>
+          <div class="d-flex justify-content-between mb-2">
+            <span class="text-muted" style="font-size: 0.9em;">Unrealized P/L</span>
+            <span class="fw-bold" style="font-size: 0.9em; {% if overall_stats.unrealized_pl >= 0 %}color: var(--bs-success);{% else %}color: var(--bs-danger);{% endif %}">
+              Rs. {{ overall_stats.unrealized_pl|floatformat:2|intcomma }}
+            </span>
+          </div>
+          <hr class="my-2">
+          <div class="d-flex justify-content-between align-items-center mt-2">
+            <h6 class="text-muted mb-0">Total Profit</h6>
+            <h5 class="fw-bold mb-0 {% if overall_stats.total_profit >= 0 %}text-primary{% else %}text-danger{% endif %}">
+              Rs. {{ overall_stats.total_profit|floatformat:2|intcomma }}
+            </h5>
+          </div>
+        </div>
+      </div>
+      
+    </div>
+  </div> 
+</div> 
+
+<div class="modal fade" id="holdingsListModal" tabindex="-1" aria-labelledby="holdingsListModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="holdingsListModalLabel">
+            <i class="bi bi-briefcase-fill"></i> All Portfolio Holdings ({{ holdings_list|length }} Scripts)
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        
+        <input type="text" class="form-control mb-3" id="modalSearch" onkeyup="filterHoldingsList()" placeholder="Type to filter list...">
+
+        <div class="table-responsive">
+          <table class="table table-sm table-striped table-bordered table-hover" id="holdingsTable" style="font-size: 0.9rem;">
+            <thead class="table-light text-center">
+              <tr>
+                <th rowspan="2" class="align-middle" onclick="sortTable('holdingsTable', 0, 'string')" style="cursor: pointer;">Script &#x21C5;</th>
+                <th rowspan="2" class="align-middle" onclick="sortTable('holdingsTable', 1, 'number')" style="cursor: pointer;">Kitta &#x21C5;</th>
+                <th rowspan="2" class="align-middle" onclick="sortTable('holdingsTable', 2, 'number')" style="cursor: pointer;">Amount (Book Value) &#x21C5;</th>
+                <th rowspan="2" class="align-middle" onclick="sortTable('holdingsTable', 3, 'number')" style="cursor: pointer;">BEP &#x21C5;</th>
+                <th rowspan="2" class="align-middle" onclick="sortTable('holdingsTable', 4, 'number')" style="cursor: pointer;">Close Price &#x21C5;</th>
+                <th colspan="2">Profit / Loss</th>
+              </tr>
+              <tr>
+                <th onclick="sortTable('holdingsTable', 5, 'number')" style="cursor: pointer;">Realized P/L &#x21C5;</th>
+                <th onclick="sortTable('holdingsTable', 6, 'number')" style="cursor: pointer;">Unrealized P/L &#x21C5;</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% if holdings_list %}
+                {% for item in holdings_list %}
+                <tr>
+                  <td>
+                    <strong><a href="{% url 'my_portfolio:company_dashboard' %}?symbol={{ item.symbol }}">{{ item.symbol }}</a></strong>
+                    <br>
+                    <small class="text-muted">{{ item.script }}</small>
+                  </td>
+                  <td class="text-end">{{ item.closing_kitta|intcomma }}</td>
+                  <td class="text-end">{{ item.book_value|floatformat:2|intcomma }}</td>
+                  <td class="text-end">{{ item.bep|floatformat:2|intcomma }}</td>
+                  <td class="text-end">{{ item.ltp|floatformat:2|intcomma }}</td>
+                  <td class="text-end {% if item.realized_pl > 0 %}text-success{% elif item.realized_pl < 0 %}text-danger{% endif %}">
+                    {{ item.realized_pl|floatformat:2|intcomma }}
+                  </td>
+                  <td class="text-end {% if item.unrealized_pl > 0 %}text-success{% elif item.unrealized_pl < 0 %}text-danger{% endif %}">
+                    {{ item.unrealized_pl|floatformat:2|intcomma }}
+                  </td>
+                </tr>
+                {% endfor %}
+              {% else %}
+                <tr>
+                  <td colspan="7" class="text-center text-muted">No holdings found.</td>
+                </tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+
+<script>
+// Object to store sort directions
+let sortDirections = {};
+
+function sortTable(tableId, colIndex, type) {
+  const table = document.getElementById(tableId);
+  const tbody = table.getElementsByTagName('tbody')[0];
+  const rows = Array.from(tbody.getElementsByTagName('tr'));
+  
+  const directionKey = `${tableId}-${colIndex}`;
+  const currentDirection = sortDirections[directionKey] || 'asc';
+  const newDirection = currentDirection === 'asc' ? 'desc' : 'asc';
+  
+  const parseNumber = (s) => {
+    s = String(s).replace(/,/g, '').replace('Rs. ', '');
+    if (s === '-') return 0;
+    return parseFloat(s) || 0;
+  };
+  
+  const sortComparer = (a, b) => {
+    let valA = a.getElementsByTagName('td')[colIndex].textContent;
+    let valB = b.getElementsByTagName('td')[colIndex].textContent;
+    
+    let compareA, compareB;
+    
+    if (type === 'number') {
+      compareA = parseNumber(valA);
+      compareB = parseNumber(valB);
+    } else {
+      compareA = valA.split('\n')[0].trim().toLowerCase();
+      compareB = valB.split('\n')[0].trim().toLowerCase();
+    }
+
+    if (compareA < compareB) {
+      return newDirection === 'asc' ? -1 : 1;
+    }
+    if (compareA > compareB) {
+      return newDirection === 'asc' ? 1 : -1;
+    }
+    return 0;
+  };
+  
+  rows.sort(sortComparer);
+  
+  rows.forEach(row => {
+    tbody.appendChild(row);
+  });
+  
+  sortDirections[directionKey] = newDirection;
+}
+</script>
+
+
+<script>
+function filterHoldingsList() {
+  const input = document.getElementById("modalSearch");
+  const filter = input.value.toUpperCase();
+  const table = document.getElementById("holdingsTable");
+  const tr = table.getElementsByTagName("tbody")[0].getElementsByTagName("tr");
+
+  for (let i = 0; i < tr.length; i++) {
+    let txtValue = tr[i].textContent || tr[i].innerText;
+    if (txtValue.toUpperCase().indexOf(filter) > -1) {
+      tr[i].style.display = "";
+    } else {
+      tr[i].style.display = "none";
+    }
+  }
+}
+</script>
+
+
+{% if summary %}
+<script>
+// This script is for the SINGLE STOCK calculator
+function calculateUnrealized() {
+  const marketPrice = parseFloat(document.getElementById('marketPrice').value);
+  const realizedPL = parseFloat('{{ summary.realized_pl|default:0 }}');
+  const closingQty = parseFloat('{{ summary.closing_qty|default:0 }}');
+  const closingCost = parseFloat('{{ summary.closing_total_cost|default:0 }}');
+
+  const unrealizedElem = document.getElementById('unrealizedPL');
+  const totalPLElem = document.getElementById('totalPL');
+  
+  let unrealized = 0.0;
+  let total = realizedPL;
+
+  if (!isNaN(marketPrice) && closingQty > 0) {
+    const currentValue = marketPrice * closingQty;
+    unrealized = currentValue - closingCost;
+    total = unrealized + realizedPL;
+
+    unrealizedElem.textContent = `Rs. ${unrealized.toLocaleString('en-US',{minimumFractionDigits:2, maximumFractionDigits:2})}`;
+    unrealizedElem.className = `text-end mt-2 fw-bold ${unrealized >= 0 ? 'text-success' : 'text-danger'}`;
+  } else {
+    unrealizedElem.textContent = `Rs. 0.00`;
+    unrealizedElem.className = `text-end mt-2 fw-bold text-info`;
+  }
+  
+  totalPLElem.textContent = `Rs. ${total.toLocaleString('en-US',{minimumFractionDigits:2, maximumFractionDigits:2})}`;
+  totalPLElem.className = `fw-bold mb-0 ${total >= 0 ? 'text-primary' : 'text-danger'}`;
+}
+document.addEventListener('DOMContentLoaded', calculateUnrealized);
+</script>
+{% endif %}
+{% endblock %}

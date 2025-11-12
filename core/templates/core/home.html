@@ -77,7 +77,8 @@
                     <div class="card-body d-flex flex-column">
                         <h5 class="card-title text-primary">My Portfolio</h5>
                         <p class="card-text">Track holdings, performance, and returns.</p>
-                        <a href="#" class="btn btn-outline-primary mt-auto disabled">Open Tracker</a>
+                        {# This link now points to your 'my_portfolio' app's 'portfolio_home' view #}
+                        <a href="{% url 'my_portfolio:portfolio_home' %}" class="btn btn-outline-primary mt-auto">Open Tracker</a>
                     </div>
                 </div>
             </div>
