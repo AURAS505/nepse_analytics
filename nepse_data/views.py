@@ -64,6 +64,17 @@ def dictfetchall(cursor):
         for row in cursor.fetchall()
     ]
 
+
+def buyer_seller_to_int(value):
+    """Converts buyer/seller value, handling 'D01'/'D02' specifically."""
+    if str(value).strip() == 'D01':
+        return 60
+    elif str(value).strip() == 'D02':
+        return 77
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return None
 # ==================================
 # --- ALL YOUR VIEWS (Corrected) ---
 # ==================================
@@ -485,16 +496,177 @@ def data_entry_view(request):
             except Exception as e:
                 messages.error(request, f"An error occurred during market cap upload: {e}")
             return redirect('nepse_data:data_entry')
-        # --- END OF CORRECTED BLOCK ---
+        
+        # --- NEW FLOORSHEET UPLOAD LOGIC ---
+        elif request.POST.get('action') == 'upload_floorsheet':
+            floorsheet_file = request.FILES.get('floorsheet_file')
+            date_str = request.POST.get('floorsheet_date')
 
+            if not floorsheet_file:
+                messages.error(request, "No floorsheet file selected.")
+                return redirect('nepse_data:data_entry')
+            if not date_str:
+                messages.error(request, "No calculation date selected.")
+                return redirect('nepse_data:data_entry')
+
+            try:
+                calculation_date = datetime.date.fromisoformat(date_str)
+            except ValueError:
+                messages.error(request, "Invalid date format.")
+                return redirect('nepse_data:data_entry')
+
+            # --- Read file using Pandas (handles both Excel and CSV) ---
+            try:
+                if floorsheet_file.name.endswith('.csv'):
+                    df = pd.read_csv(floorsheet_file)
+                else:
+                    df = pd.read_excel(floorsheet_file)
+                df.columns = [col.upper().strip() for col in df.columns]
+            except Exception as e:
+                messages.error(request, f"Error reading file: {e}")
+                return redirect('nepse_data:data_entry')
+
+            # --- Validate required columns ---
+            required_cols = ['SN', 'CONTRACT NO.', 'STOCK SYMBOL', 'BUYER', 'SELLER', 'QUANTITY', 'RATE (RS)', 'AMOUNT (RS)']
+            if not all(col in df.columns for col in required_cols):
+                missing = [col for col in required_cols if col not in df.columns]
+                messages.error(request, f"File is missing required columns: {', '.join(missing)}")
+                return redirect('nepse_data:data_entry')
+
+            # --- Get the Sector Map (using Django ORM) ---
+            sector_map = {
+                k.upper(): v for k, v in
+                Companies.objects.values_list('script_ticker', 'sector')
+                if k
+            }
+            
+            # --- Delete existing data for this date (from SQL_Importer logic) ---
+            with connection.cursor() as cursor:
+                print(f"Deleting existing records for {calculation_date}")
+                cursor.execute("DELETE FROM floorsheet_raw WHERE calculation_date = %s", [calculation_date])
+                cursor.execute("DELETE FROM buyer_summary WHERE calculation_date = %s", [calculation_date])
+                cursor.execute("DELETE FROM seller_summary WHERE calculation_date = %s", [calculation_date])
+                cursor.execute("DELETE FROM sector_buyer_summary WHERE calculation_date = %s", [calculation_date])
+                cursor.execute("DELETE FROM sector_seller_summary WHERE calculation_date = %s", [calculation_date])
+
+            # --- Prepare records for bulk creation ---
+            records_to_insert = []
+            failed_rows = 0
+            for index, row in df.iterrows():
+                try:
+                    original_id = int(row['SN'])
+                    stock_symbol = str(row['STOCK SYMBOL']).upper()
+                    sector = sector_map.get(stock_symbol, None)
+
+                    # Replicate the unique ID logic from SQL_Importer.py
+                    new_id = int(f"{calculation_date.strftime('%Y%m%d')}{original_id:06d}")
+
+                    records_to_insert.append(FloorsheetRaw(
+                        id=new_id,
+                        contract_no=str(row['CONTRACT NO.']),
+                        stock_symbol=stock_symbol,
+                        buyer=buyer_seller_to_int(row['BUYER']),
+                        seller=buyer_seller_to_int(row['SELLER']),
+                        quantity=clean_int(row['QUANTITY']),
+                        rate=clean_decimal(row['RATE (RS)']),
+                        amount=clean_decimal(row['AMOUNT (RS)']),
+                        calculation_date=calculation_date,
+                        sector=sector
+                    ))
+                except Exception as e:
+                    print(f"Skipping row {index}: {e}")
+                    failed_rows += 1
+
+            # --- Insert all records in a single batch ---
+            FloorsheetRaw.objects.bulk_create(records_to_insert, ignore_conflicts=True)
+            inserted_count = len(records_to_insert)
+
+            # --- Now, repopulate the summary tables (Raw SQL from SQL_Importer.py) ---
+            with connection.cursor() as cursor:
+                print(f"Populating summary tables for {calculation_date}...")
+                
+                # BUYER SUMMARY - PER COMPANY
+                cursor.execute("""
+                    INSERT INTO buyer_summary (calculation_date, stock_symbol, buyer, sector, total_quantity, total_amount, average_rate)
+                    SELECT calculation_date, stock_symbol, buyer, sector, SUM(quantity), SUM(amount), SUM(amount) / SUM(quantity)
+                    FROM floorsheet_raw WHERE calculation_date = %s GROUP BY calculation_date, stock_symbol, buyer, sector
+                    ON DUPLICATE KEY UPDATE
+                        sector = VALUES(sector), total_quantity = VALUES(total_quantity),
+                        total_amount = VALUES(total_amount), average_rate = VALUES(average_rate);
+                """, [calculation_date])
+
+                # SELLER SUMMARY - PER COMPANY
+                cursor.execute("""
+                    INSERT INTO seller_summary (calculation_date, stock_symbol, seller, sector, total_quantity, total_amount, average_rate)
+                    SELECT calculation_date, stock_symbol, seller, sector, SUM(quantity), SUM(amount), SUM(amount) / SUM(quantity)
+                    FROM floorsheet_raw WHERE calculation_date = %s GROUP BY calculation_date, stock_symbol, seller, sector
+                    ON DUPLICATE KEY UPDATE
+                        sector = VALUES(sector), total_quantity = VALUES(total_quantity),
+                        total_amount = VALUES(total_amount), average_rate = VALUES(average_rate);
+                """, [calculation_date])
+
+                # SECTOR BUYER SUMMARY - PER SECTOR
+                cursor.execute("""
+                    INSERT INTO sector_buyer_summary (calculation_date, sector, buyer, total_quantity, total_amount, average_rate)
+                    SELECT calculation_date, sector, buyer, SUM(quantity), SUM(amount), SUM(amount) / SUM(quantity)
+                    FROM floorsheet_raw WHERE calculation_date = %s AND sector IS NOT NULL GROUP BY calculation_date, sector, buyer
+                    ON DUPLICATE KEY UPDATE
+                        total_quantity = VALUES(total_quantity), total_amount = VALUES(total_amount), average_rate = VALUES(average_rate);
+                """, [calculation_date])
+
+                # SECTOR SELLER SUMMARY - PER SECTOR
+                cursor.execute("""
+                    INSERT INTO sector_seller_summary (calculation_date, sector, seller, total_quantity, total_amount, average_rate)
+                    SELECT calculation_date, sector, seller, SUM(quantity), SUM(amount), SUM(amount) / SUM(quantity)
+                    FROM floorsheet_raw WHERE calculation_date = %s AND sector IS NOT NULL GROUP BY calculation_date, sector, seller
+                    ON DUPLICATE KEY UPDATE
+                        total_quantity = VALUES(total_quantity), total_amount = VALUES(total_amount), average_rate = VALUES(average_rate);
+                """, [calculation_date])
+
+            messages.success(request, f"Floorsheet upload for {calculation_date} successful! Inserted {inserted_count} records. Skipped {failed_rows} rows. Summary tables updated.")
+            return redirect('nepse_data:data_entry')
+        
     else:
         # --- HANDLE GET REQUEST (Unchanged) ---
         available_dates = StockPrices.objects.values('business_date').distinct().order_by('-business_date')
+
+        available_floorsheet_dates = FloorsheetRaw.objects.values('calculation_date').distinct().order_by('-calculation_date')
+
         context = {
             'title': 'Data Entry Portal',
-            'available_dates': available_dates
+            'available_dates': available_dates,
+            'available_floorsheet_dates': available_floorsheet_dates
         }
         return render(request, 'nepse_data/data_entry.html', context)
+
+@require_POST
+def delete_floorsheet_data_view(request):
+    dates_to_delete = request.POST.getlist('dates_to_delete')
+    if not dates_to_delete:
+        messages.warning(request, "No dates were selected for deletion.")
+        return redirect('nepse_data:data_entry')
+    
+    try:
+        with connection.cursor() as cursor:
+            # Create a string of placeholders (%s, %s, %s)
+            placeholders = ','.join(['%s'] * len(dates_to_delete))
+            
+            # Delete from summary tables first
+            cursor.execute(f"DELETE FROM sector_seller_summary WHERE calculation_date IN ({placeholders})", dates_to_delete)
+            cursor.execute(f"DELETE FROM sector_buyer_summary WHERE calculation_date IN ({placeholders})", dates_to_delete)
+            cursor.execute(f"DELETE FROM seller_summary WHERE calculation_date IN ({placeholders})", dates_to_delete)
+            cursor.execute(f"DELETE FROM buyer_summary WHERE calculation_date IN ({placeholders})", dates_to_delete)
+            
+            # Finally, delete from the raw floorsheet table
+            cursor.execute(f"DELETE FROM floorsheet_raw WHERE calculation_date IN ({placeholders})", dates_to_delete)
+
+        messages.success(request, f"Successfully deleted all floorsheet and summary data for {len(dates_to_delete)} selected date(s).")
+    except Exception as e:
+        messages.error(request, f"An error occurred while deleting: {e}")
+    
+    return redirect('nepse_data:data_entry')
+
+
 
 @require_POST
 def delete_price_data_view(request):

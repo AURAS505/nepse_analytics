@@ -131,11 +131,60 @@
         </div>
 
         <div class="card shadow-sm border-0 mt-5">
+            <div class="card-header bg-dark text-white">
+                <h5 class="mb-0">Upload Floorsheet Data (Excel/CSV)</h5>
+            </div>
+            <div class="card-body p-4">
+                <p class="card-text">
+                    Upload a single day's floorsheet file (Excel or CSV). You <strong>must</strong> select the
+                    correct date for this data. The system will delete any existing floorsheet
+                    and summary data for the selected date before importing.
+                </p>
+                <hr>
+                <form method="POST" action="{% url 'nepse_data:data_entry' %}" enctype="multipart/form-data" class="needs-validation" novalidate>
+                    {% csrf_token %}
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label for="floorsheet_file" class="form-label"><b>Floorsheet File</b><span class="text-danger">*</span></label>
+                            <input class="form-control" type="file" id="floorsheet_file" name="floorsheet_file" accept=".csv,.xlsx,.xls" required>
+                            <div class="invalid-feedback">
+                                Please select a .csv or .xlsx file.
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="floorsheet_date" class="form-label"><b>Calculation Date</b><span class="text-danger">*</span></label>
+                            <input class="form-control" type="date" id="floorsheet_date" name="floorsheet_date" required>
+                            <div class="invalid-feedback">
+                                Please select a valid date for this data.
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="text-end mt-4">
+                        <button type="button" class="btn btn-danger btn-lg" data-bs-toggle="modal" data-bs-target="#deleteFloorsheetModal">
+                            <i class="bi bi-trash"></i>
+                            Delete Floorsheet Data
+                        </button>
+
+                        <button type="submit" name="action" value="upload_floorsheet" class="btn btn-dark btn-lg ms-2">
+                            <i class="bi bi-upload"></i>
+                            Upload Floorsheet Data
+                        </button>
+                    </div>
+                </form>
+            </div>
+            <div class="card-footer bg-light">
+                <small class="text-muted">
+                    This process will also automatically re-calculate the Buyer, Seller, and Sector summaries for the selected date.
+                </small>
+            </div>
+        </div>
+        <div class="card shadow-sm border-0 mt-5">
             <div class="card-header bg-warning">
                 <h5 class="mb-0">Recalculate All Adjusted Prices</h5>
             </div>
             <div class="card-body p-4">
-                <p class="card-text">
+                <p classV="card-text">
                     Click this button to run the optimized recalculation process. This will:
                     <br>1. Run a full adjustment for all symbols <strong>with</strong> corporate actions (bonus/right).
                     <br>2. Run a fast copy for all symbols <strong>without</strong> corporate actions.
@@ -212,6 +261,51 @@
         </div>
     </div>
 </div>
+
+<div class="modal fade" id="deleteFloorsheetModal" tabindex="-1" aria-labelledby="deleteFloorsheetModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="deleteFloorsheetModalLabel">Delete Floorsheet Data by Date</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form method="POST" action="{% url 'nepse_data:delete_floorsheet_data' %}">
+                {% csrf_token %} <div class="modal-body">
+                    <p>Select one or more dates to <strong>permanently delete</strong> all associated floorsheet data.
+                    <br><small class="text-danger fw-bold">Warning: This will also delete all Buyer, Seller, and Sector summaries for these dates.</small></p>
+                    
+                    <div class="form-group">
+                        <label for="dates_to_delete" class="form-label">Available Floorsheet Dates:</label>
+                        <select class="form-select" 
+                                multiple 
+                                required 
+                                name="dates_to_delete" 
+                                id="dates_to_delete_floorsheet" 
+                                size="15">
+                        {% if available_floorsheet_dates %}
+                            {% for row in available_floorsheet_dates %}
+                                <option value="{{ row.calculation_date|date:"Y-m-d" }}">{{ row.calculation_date|date:"Y-m-d" }}</option>
+                            {% endfor %}
+                        {% else %}
+                            <option disabled>No floorsheet data found to delete.</option>
+                        {% endif %}
+                        </select>
+                        <div class="invalid-feedback">
+                            Please select at least one date.
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-danger" {% if not available_floorsheet_dates %}disabled{% endif %}>
+                        <i class="bi bi-trash-fill"></i>
+                        Confirm Delete
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 
@@ -220,7 +314,7 @@
 {
     "startRecalc": "{% url 'adjustments_stock_price:start_recalc' %}",
     "recalcStatus": "/adjustments/recalc-status/",
-    "clearJob": "/adjustments/clear-job/"
+    "clearJob": "/adjustsments/clear-job/"
 }
 </script>
 

@@ -19,4 +19,5 @@ urlpatterns = [
     path('download-marcap/', views.download_marcap_view, name='download_marcap'),
     path('floorsheet/', views.floorsheet_view, name='floorsheet'),
     path('download-floorsheet/', views.download_floorsheet_view, name='download_floorsheet'),
+    path('data-entry/delete-floorsheet/', views.delete_floorsheet_data_view, name='delete_floorsheet_data'),
 ]
