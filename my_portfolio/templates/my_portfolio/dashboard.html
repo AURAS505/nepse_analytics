@@ -3,194 +3,367 @@
 
 {% block title %}Dashboard - Stock Portfolio Manager{% endblock %}
 
+{% block extra_css %}
+<style>
+    /* Enhanced Typography */
+    body {
+        font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+        font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    }
+    
+    .display-4 {
+        font-weight: 700;
+        letter-spacing: -0.02em;
+    }
+    
+    /* Enhanced Cards */
+    .metric-card {
+        border: none;
+        border-radius: 12px;
+        transition: all 0.3s ease;
+        background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .metric-card::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 4px;
+        background: linear-gradient(90deg, var(--accent-color), var(--accent-light));
+    }
+    
+    .metric-card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 12px 24px rgba(0,0,0,0.15) !important;
+    }
+    
+    .metric-card.card-primary::before { --accent-color: #0d6efd; --accent-light: #4d94ff; }
+    .metric-card.card-success::before { --accent-color: #198754; --accent-light: #52c27a; }
+    .metric-card.card-info::before { --accent-color: #0dcaf0; --accent-light: #4dd9f5; }
+    .metric-card.card-warning::before { --accent-color: #ffc107; --accent-light: #ffcd39; }
+    .metric-card.card-danger::before { --accent-color: #dc3545; --accent-light: #e4606d; }
+    
+    .metric-icon-wrapper {
+        width: 64px;
+        height: 64px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 12px;
+        margin: 0 auto 1rem;
+    }
+    
+    .metric-icon-wrapper.bg-primary-subtle { background: linear-gradient(135deg, #cfe2ff 0%, #e7f1ff 100%); }
+    .metric-icon-wrapper.bg-success-subtle { background: linear-gradient(135deg, #d1e7dd 0%, #e8f5e9 100%); }
+    .metric-icon-wrapper.bg-info-subtle { background: linear-gradient(135deg, #cff4fc 0%, #e5f9fd 100%); }
+    .metric-icon-wrapper.bg-warning-subtle { background: linear-gradient(135deg, #fff3cd 0%, #fff9e6 100%); }
+    .metric-icon-wrapper.bg-danger-subtle { background: linear-gradient(135deg, #f8d7da 0%, #fdeced 100%); }
+    
+    .metric-value {
+        font-size: 2rem;
+        font-weight: 700;
+        line-height: 1.2;
+        margin-bottom: 0.5rem;
+    }
+    
+    .metric-label {
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: #495057;
+        margin-bottom: 0.25rem;
+    }
+    
+    .metric-sublabel {
+        font-size: 0.8rem;
+        color: #6c757d;
+    }
+    
+    /* Welcome Card */
+    .welcome-card {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border: none;
+        border-radius: 16px;
+        color: white;
+    }
+    
+    .welcome-card .btn-light {
+        border-radius: 8px;
+        font-weight: 600;
+        padding: 12px 24px;
+        transition: all 0.3s ease;
+    }
+    
+    .welcome-card .btn-light:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+    }
+    
+    /* Enhanced Tables */
+    .modern-table {
+        font-size: 0.875rem;
+        border-collapse: separate;
+        border-spacing: 0;
+    }
+    
+    .modern-table thead th {
+        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+        font-weight: 600;
+        text-transform: uppercase;
+        font-size: 0.75rem;
+        letter-spacing: 0.05em;
+        color: #495057;
+        border-bottom: 2px solid #dee2e6;
+        padding: 1rem 0.75rem;
+        white-space: nowrap;
+    }
+    
+    .modern-table tbody tr {
+        transition: all 0.2s ease;
+    }
+    
+    .modern-table tbody tr:hover {
+        background-color: #f8f9fa;
+        transform: scale(1.01);
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+    
+    .modern-table tbody td {
+        padding: 0.875rem 0.75rem;
+        vertical-align: middle;
+        border-bottom: 1px solid #e9ecef;
+    }
+    
+    .company-name {
+        font-weight: 600;
+        color: #212529;
+        font-size: 0.9rem;
+    }
+    
+    /* Quick Action Buttons */
+    .action-btn {
+        border-radius: 12px;
+        border: 2px solid;
+        transition: all 0.3s ease;
+        font-weight: 600;
+        padding: 1.25rem 1rem;
+    }
+    
+    .action-btn:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 8px 16px rgba(0,0,0,0.15);
+    }
+    
+    .action-icon {
+        font-size: 2.5rem;
+        margin-bottom: 0.5rem;
+        display: block;
+    }
+    
+    /* Section Cards */
+    .section-card {
+        border: none;
+        border-radius: 12px;
+        overflow: hidden;
+    }
+    
+    .section-header {
+        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+        border-bottom: 3px solid #dee2e6;
+        padding: 1rem 1.5rem;
+    }
+    
+    .section-header h5, .section-header h6 {
+        font-weight: 700;
+        margin: 0;
+        color: #212529;
+    }
+    
+    /* Badge Styles */
+    .pl-badge {
+        padding: 0.35rem 0.65rem;
+        border-radius: 6px;
+        font-weight: 600;
+        font-size: 0.8rem;
+    }
+    
+    /* Profit/Loss Colors */
+    .profit { color: #198754; }
+    .loss { color: #dc3545; }
+    
+    /* Getting Started Card */
+    .getting-started-card {
+        background: linear-gradient(135deg, #e3f2fd 0%, #f1f8fe 100%);
+        border: 2px solid #90caf9;
+        border-radius: 12px;
+    }
+    
+    .getting-started-card ol li {
+        padding: 0.5rem 0;
+        font-size: 1rem;
+    }
+    
+    /* Responsive adjustments */
+    @media (max-width: 768px) {
+        .metric-value { font-size: 1.5rem; }
+        .action-icon { font-size: 2rem; }
+    }
+</style>
+{% endblock %}
+
 {% block title_header %}
 <i class="bi bi-graph-up-arrow"></i> Stock Portfolio Manager
-{# --- REMOVED LINK TO company_management --- #}
 {% endblock %}
 
 {% block content %}
+{# --- 1. WELCOME SECTION --- #}
 <div class="row mb-4">
     <div class="col-12">
-        <div class="card card-body p-5">
+        <div class="card welcome-card card-body p-5 shadow-lg">
             <h1 class="display-4 fw-bold mb-3">
-                <i class="bi bi-graph-up-arrow"></i> Welcome!
+                <i class="bi bi-graph-up-arrow"></i> Welcome Back!
             </h1>
-            <p class="lead mb-4">Track your investments, manage transactions, and monitor your portfolio performance.</p>
+            <p class="lead mb-4 opacity-90">Track your investments, manage transactions, and monitor your portfolio performance in real-time.</p>
             <div class="d-flex gap-3 flex-wrap">
-                <a href="{% url 'my_portfolio:transactions' %}" class="btn btn-primary btn-lg">
-                    <i class="bi bi-plus-circle"></i> Add Transaction
+                <a href="{% url 'my_portfolio:transactions' %}" class="btn btn-light btn-lg shadow" title="Stock Entry Portal">
+                    <i class="bi bi-plus-circle me-2"></i> Add S/P Transaction
                 </a>
-                <a href="{% url 'my_portfolio:company_dashboard' %}" class="btn btn-outline-secondary btn-lg">
-                    <i class="bi bi-pie-chart"></i> View Portfolio Report
+                <a href="{% url 'my_portfolio:company_dashboard' %}" class="btn btn-light btn-lg shadow" title="Broker Entry Portal">
+                    <i class="bi bi-wallet2 me-2"></i> Add R/P Transaction
                 </a>
             </div>
         </div>
     </div>
 </div>
 
-<div class="row g-4 mb-4">
-    <div class="col-md-3">
-        <div class="card h-100 shadow-sm">
+{# --- 2. METRICS CARDS (5 Columns) --- #}
+<div class="row row-cols-1 row-cols-md-3 row-cols-lg-5 g-4 mb-4">
+    {# TRADED COMPANIES #}
+    <div class="col">
+        <div class="card metric-card card-primary h-100 shadow-sm">
             <div class="card-body text-center p-4">
-                <div class="mb-3">
-                    <i class="bi bi-building text-primary" style="font-size: 3rem;"></i>
+                <div class="metric-icon-wrapper bg-primary-subtle">
+                    <i class="bi bi-building text-primary" style="font-size: 2rem;"></i>
                 </div>
-                <h3 class="fw-bold text-primary">{{ stats.total_companies|intcomma }}</h3>
-                <p class="text-muted mb-0">Companies</p>
-                {# --- UPDATED: Link to main admin or another app --- #}
-                <a href="/admin/listed_companies/companies/" class="btn btn-sm btn-outline-primary mt-3" target="_blank">
-                    View List <i class="bi bi-arrow-right"></i>
-                </a>
+                <div class="metric-value text-primary">{{ stats.total_scrips_traded|default:0|intcomma }}</div>
+                <div class="metric-label">Traded Companies</div>
+                <div class="metric-sublabel">Latest Scrips Traded</div>
             </div>
         </div>
     </div>
-    
-    <div class="col-md-3">
-        <div class="card h-100 shadow-sm">
+
+    {# HOLDINGS #}
+    <div class="col">
+        <div class="card metric-card card-success h-100 shadow-sm">
             <div class="card-body text-center p-4">
-                <div class="mb-3">
-                    <i class="bi bi-list-ul text-success" style="font-size: 3rem;"></i>
+                <div class="metric-icon-wrapper bg-success-subtle">
+                    <i class="bi bi-briefcase text-success" style="font-size: 2rem;"></i>
                 </div>
-                <h3 class="fw-bold text-success">{{ stats.total_transactions|intcomma }}</h3>
-                <p class="text-muted mb-0">Transactions</p>
-                <a href="{% url 'my_portfolio:transactions' %}" class="btn btn-sm btn-outline-success mt-3">
-                    View All <i class="bi bi-arrow-right"></i>
-                </a>
+                <div class="metric-value text-success">{{ stats.holdings_count|intcomma }}</div>
+                <div class="metric-label">Holdings</div>
+                <div class="metric-sublabel">Companies in Portfolio</div>
             </div>
         </div>
     </div>
-    
-    <div class="col-md-3">
-        <div class="card h-100 shadow-sm">
+
+    {# TOTAL INVESTMENT #}
+    <div class="col">
+        <div class="card metric-card card-info h-100 shadow-sm">
             <div class="card-body text-center p-4">
-                <div class="mb-3">
-                    <i class="bi bi-briefcase text-warning" style="font-size: 3rem;"></i>
+                <div class="metric-icon-wrapper bg-info-subtle">
+                    <i class="bi bi-cash-stack text-info" style="font-size: 2rem;"></i>
                 </div>
-                <h3 class="fw-bold text-warning">{{ stats.total_holdings|intcomma }}</h3>
-                <p class="text-muted mb-0">Holdings</p>
-                <a href="{% url 'my_portfolio:company_dashboard' %}" class="btn btn-sm btn-outline-warning mt-3">
-                    Details <i class="bi bi-arrow-right"></i>
-                </a>
+                <div class="metric-value text-info">{{ stats.total_investment_crore|floatformat:2 }} CR</div>
+                <div class="metric-label">Total Investment</div>
+                <div class="metric-sublabel">Net Cash Outflow</div>
             </div>
         </div>
     </div>
-    
-    <div class="col-md-3">
-        <div class="card h-100 shadow-sm">
+
+    {# TOTAL MARKET VALUE #}
+    <div class="col">
+        <div class="card metric-card card-success h-100 shadow-sm">
             <div class="card-body text-center p-4">
-                <div class="mb-3">
-                    <i class="bi bi-cash-stack text-info" style="font-size: 3rem;"></i>
+                <div class="metric-icon-wrapper bg-success-subtle">
+                    <i class="bi bi-currency-dollar text-success" style="font-size: 2rem;"></i>
                 </div>
-                <h3 class="fw-bold text-info">Rs. {{ stats.total_investment|floatformat:0|intcomma }}</h3>
-                <p class="text-muted mb-0">Total Investment</p>
-                <small class="text-muted">Net Position</small>
+                <div class="metric-value text-success">{{ stats.total_market_value_crore|floatformat:2 }} CR</div>
+                <div class="metric-label">Total Market Value</div>
+                <div class="metric-sublabel">Current Portfolio Value</div>
+            </div>
+        </div>
+    </div>
+
+    {# TOTAL PROFIT/LOSS #}
+    <div class="col">
+        <div class="card metric-card {% if stats.total_profit_loss >= 0 %}card-success{% else %}card-danger{% endif %} h-100 shadow-sm">
+            <div class="card-body text-center p-4">
+                <div class="metric-icon-wrapper {% if stats.total_profit_loss >= 0 %}bg-success-subtle{% else %}bg-danger-subtle{% endif %}">
+                    <i class="bi bi-graph-up-arrow {% if stats.total_profit_loss >= 0 %}text-success{% else %}text-danger{% endif %}" style="font-size: 2rem;"></i>
+                </div>
+                <div class="metric-value {% if stats.total_profit_loss >= 0 %}text-success{% else %}text-danger{% endif %}">
+                    Rs. {{ stats.total_profit_loss_crore|default:0|floatformat:2|intcomma }} CR
+                </div>
+                <div class="metric-label">Total Profit/Loss</div>
+                <div class="metric-sublabel d-flex justify-content-center gap-2">
+                    <span class="pl-badge {% if stats.realized_pl >= 0 %}bg-success-subtle text-success{% else %}bg-danger-subtle text-danger{% endif %}">
+                        R: {{ stats.realized_pl|floatformat:0|intcomma }}
+                    </span>
+                    <span class="pl-badge {% if stats.unrealized_pl >= 0 %}bg-success-subtle text-success{% else %}bg-danger-subtle text-danger{% endif %}">
+                        U: {{ stats.unrealized_pl|floatformat:0|intcomma }}
+                    </span>
+                </div>
             </div>
         </div>
     </div>
 </div>
 
-<div class="row">
-    <div class="col-12">
-        <div class="card shadow-sm">
-            <div class="card-header d-flex justify-content-between align-items-center py-3">
-                <h5 class="mb-0">
-                    <i class="bi bi-clock-history text-primary"></i> Recent Transactions
-                </h5>
-                <a href="{% url 'my_portfolio:transactions' %}" class="btn btn-sm btn-outline-primary">
-                    View All <i class="bi bi-arrow-right"></i>
-                </a>
-            </div>
-            <div class="card-body p-0">
-                {% if stats.recent_transactions %}
-                <div class="table-responsive">
-                    <table class="table table-hover mb-0">
-                        <thead class="table-light">
-                            <tr>
-                                <th>Date</th>
-                                <th>Symbol</th>
-                                <th>Company</th>
-                                <th>Type</th>
-                                <th class="text-end">Kitta</th>
-                                <th class="text-end">Amount</th>
-                                <th class="text-end">Rate</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for txn in stats.recent_transactions %}
-                            <tr>
-                                <td>{{ txn.date|date:"Y-m-d" }}</td>
-                                <td><strong class="text-primary">{{ txn.symbol.script_ticker }}</strong></td>
-                                <td>{{ txn.script }}</td>
-                                <td>
-                                    {% if txn.transaction_type == 'BUY' %}
-                                        <span class="badge bg-success">BUY</span>
-                                    {% elif txn.transaction_type == 'SALE' %}
-                                        <span class="badge bg-danger">SALE</span>
-                                    {% elif txn.transaction_type == 'BONUS' %}
-                                        <span class="badge bg-info">BONUS</span>
-                                    {% elif txn.transaction_type == 'Balance b/d' %}
-                                        <span class="badge bg-secondary">Balance b/d</span>
-                                    {% else %}
-                                        <span class="badge bg-warning text-dark">{{ txn.transaction_type }}</span>
-                                    {% endif %}
-                                </td>
-                                <td class="text-end">{{ txn.kitta|intcomma }}</td>
-                                <td class="text-end">
-                                    {% if txn.billed_amount %}
-                                        Rs. {{ txn.billed_amount|floatformat:2|intcomma }}
-                                    {% else %}
-                                        -
-                                    {% endif %}
-                                </td>
-                                <td class="text-end">
-                                    {% if txn.rate %}
-                                        Rs. {{ txn.rate|floatformat:2|intcomma }}
-                                    {% else %}
-                                        -
-                                    {% endif %}
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-                {% else %}
-                <div class="text-center py-5">
-                    <i class="bi bi-inbox text-muted" style="font-size: 4rem;"></i>
-                    <h5 class="text-muted mt-3">No transactions yet</h5>
-                    <p class="text-muted">Start by adding your first transaction</p>
-                    <a href="{% url 'my_portfolio:transactions' %}" class="btn btn-primary mt-2">
-                        <i class="bi bi-plus-circle"></i> Add Transaction
-                    </a>
-                </div>
-                {% endif %}
-            </div>
-        </div>
-    </div>
-</div>
-
+{# --- 3. QUICK ACTIONS / REPORTS --- #}
 <div class="row mt-4">
     <div class="col-12">
-        <div class="card shadow-sm">
+        <div class="card section-card shadow-sm">
+            <div class="section-header">
+                <h5><i class="bi bi-lightning-charge-fill text-warning me-2"></i> Quick Actions & Reports</h5>
+            </div>
             <div class="card-body p-4">
-                <h5 class="mb-4"><i class="bi bi-lightning-charge text-warning"></i> Quick Actions</h5>
                 <div class="row g-3">
-                    <div class="col-md-4">
-                        <a href="{% url 'my_portfolio:transactions' %}" class="btn btn-outline-primary w-100 py-3">
-                            <i class="bi bi-plus-circle d-block mb-2" style="font-size: 2rem;"></i>
-                            Add Transaction
+                    <div class="col-6 col-md-4 col-lg-2">
+                        <a href="{% url 'my_portfolio:company_dashboard' %}" class="btn btn-outline-info action-btn w-100">
+                            <i class="bi bi-pie-chart-fill action-icon"></i>
+                            <div>Company Report</div>
                         </a>
                     </div>
-                    <div class="col-md-4">
-                        <a href="{% url 'my_portfolio:transactions' %}" class="btn btn-outline-success w-100 py-3">
-                            <i class="bi bi-list-ul d-block mb-2" style="font-size: 2rem;"></i>
-                            View Transactions
+                    <div class="col-6 col-md-4 col-lg-2">
+                        <a href="#" class="btn btn-outline-success action-btn w-100">
+                            <i class="bi bi-eye-fill action-icon"></i>
+                            <div>Portfolio Watch</div>
                         </a>
                     </div>
-                    <div class="col-md-4">
-                        <a href="{% url 'my_portfolio:company_dashboard' %}" class="btn btn-outline-info w-100 py-3">
-                            <i class="bi bi-pie-chart d-block mb-2" style="font-size: 2rem;"></i>
-                            Portfolio Report
+                    <div class="col-6 col-md-4 col-lg-2">
+                        <a href="#" class="btn btn-outline-primary action-btn w-100">
+                            <i class="bi bi-journal-text action-icon"></i>
+                            <div>S/P Report</div>
+                        </a>
+                    </div>
+                    <div class="col-6 col-md-4 col-lg-2">
+                        <a href="#" class="btn btn-outline-secondary action-btn w-100">
+                            <i class="bi bi-calculator-fill action-icon"></i>
+                            <div>Broker Ledger</div>
+                        </a>
+                    </div>
+                    <div class="col-6 col-md-4 col-lg-2">
+                        <a href="#" class="btn btn-outline-warning action-btn w-100">
+                            <i class="bi bi-bar-chart-line-fill action-icon"></i>
+                            <div>Valuation Report</div>
+                        </a>
+                    </div>
+                    <div class="col-6 col-md-4 col-lg-2">
+                        <a href="{% url 'my_portfolio:transactions' %}" class="btn btn-outline-danger action-btn w-100">
+                            <i class="bi bi-plus-circle-fill action-icon"></i>
+                            <div>Add Transaction</div>
                         </a>
                     </div>
                 </div>
@@ -199,30 +372,177 @@
     </div>
 </div>
 
+{# --- 4. TOP 10 INVESTMENTS TABLE --- #}
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card section-card shadow-sm">
+            <div class="section-header">
+                <h5><i class="bi bi-trophy-fill text-warning me-2"></i> TOP 10 INVESTMENTS</h5>
+            </div>
+            <div class="table-responsive">
+                <table class="table modern-table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th class="text-start"><i class="bi bi-building me-1"></i> Company</th>
+                            <th class="text-end"><i class="bi bi-hash me-1"></i> Kitta</th>
+                            <th class="text-end"><i class="bi bi-cash me-1"></i> Investment</th>
+                            <th class="text-end"><i class="bi bi-graph-up me-1"></i> T.PL</th>
+                            <th class="text-end"><i class="bi bi-pie-chart me-1"></i> Sector %</th>
+                            <th class="text-end"><i class="bi bi-bar-chart me-1"></i> Total %</th>
+                            <th class="text-end"><i class="bi bi-calendar-week me-1"></i> 4W Change%</th>
+                            <th class="text-end"><i class="bi bi-shield-check me-1"></i> VaR 1W</th>
+                            <th class="text-end"><i class="bi bi-arrow-repeat me-1"></i> Mean Returns</th>
+                            <th class="text-end"><i class="bi bi-scatter me-1"></i> Risk-Return</th>
+                            <th class="text-end"><i class="bi bi-activity me-1"></i> Beta</th>
+                            <th class="text-end"><i class="bi bi-currency-rupee me-1"></i> EPS</th>
+                            <th class="text-end"><i class="bi bi-book me-1"></i> BVP</th>
+                            <th class="text-end"><i class="bi bi-percent me-1"></i> PE</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in stats.top_investments %}
+                        <tr>
+                            <td class="text-start">
+                                <span class="company-name">{{ row.symbol }}</span>
+                            </td>
+                            <td class="text-end">{{ row.closing_kitta|intcomma }}</td>
+                            <td class="text-end fw-semibold">{{ row.book_value|floatformat:0|intcomma }}</td>
+                            <td class="text-end fw-bold {% if row.total_pl >= 0 %}profit{% else %}loss{% endif %}">
+                                {{ row.total_pl|floatformat:0|intcomma }}
+                            </td>
+                            <td class="text-end">{{ row.allocation_sector|floatformat:2 }}%</td>
+                            <td class="text-end">{{ row.allocation_total|floatformat:2 }}%</td>
+                            <td class="text-muted text-end">—</td>
+                            <td class="text-muted text-end">—</td>
+                            <td class="text-muted text-end">—</td>
+                            <td class="text-muted text-end">—</td>
+                            <td class="text-muted text-end">—</td>
+                            <td class="text-muted text-end">—</td>
+                            <td class="text-muted text-end">—</td>
+                            <td class="text-muted text-end">—</td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="14" class="text-center text-muted py-4">
+                                <i class="bi bi-inbox" style="font-size: 2rem;"></i>
+                                <div class="mt-2">No investments found</div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# --- 5. TOP GAINERS & LOSERS --- #}
+<div class="row mt-4 g-4">
+    {# Top Gainers #}
+    <div class="col-lg-6">
+        <div class="card section-card shadow-sm h-100">
+            <div class="section-header" style="background: linear-gradient(135deg, #d1e7dd 0%, #e8f5e9 100%);">
+                <h6><i class="bi bi-arrow-up-circle-fill text-success me-2"></i> Top 10 Gainers</h6>
+            </div>
+            <div class="table-responsive">
+                <table class="table modern-table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th class="text-start"><i class="bi bi-building me-1"></i> Company</th>
+                            <th class="text-end"><i class="bi bi-graph-up me-1"></i> Total Gain</th>
+                            <th class="text-end"><i class="bi bi-percent me-1"></i> ROI</th>
+                            <th class="text-end"><i class="bi bi-pie-chart me-1"></i> Sector %</th>
+                            <th class="text-end"><i class="bi bi-bar-chart me-1"></i> Total %</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in stats.top_gainers %}
+                        <tr>
+                            <td class="text-start">
+                                <span class="company-name">{{ row.symbol }}</span>
+                            </td>
+                            <td class="text-end fw-bold profit">{{ row.total_pl|floatformat:0|intcomma }}</td>
+                            <td class="text-end">{{ row.roi_individual|floatformat:2 }}%</td>
+                            <td class="text-end">{{ row.contribution_sector|floatformat:2 }}%</td>
+                            <td class="text-end">{{ row.contribution_total|floatformat:2 }}%</td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="5" class="text-center text-muted py-4">
+                                <i class="bi bi-inbox" style="font-size: 2rem;"></i>
+                                <div class="mt-2">No gains recorded</div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    {# Top Losers #}
+    <div class="col-lg-6">
+        <div class="card section-card shadow-sm h-100">
+            <div class="section-header" style="background: linear-gradient(135deg, #f8d7da 0%, #fdeced 100%);">
+                <h6><i class="bi bi-arrow-down-circle-fill text-danger me-2"></i> Top 10 Losers</h6>
+            </div>
+            <div class="table-responsive">
+                <table class="table modern-table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th class="text-start"><i class="bi bi-building me-1"></i> Company</th>
+                            <th class="text-end"><i class="bi bi-graph-down me-1"></i> Total Loss</th>
+                            <th class="text-end"><i class="bi bi-percent me-1"></i> ROI</th>
+                            <th class="text-end"><i class="bi bi-pie-chart me-1"></i> Sector %</th>
+                            <th class="text-end"><i class="bi bi-bar-chart me-1"></i> Total %</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in stats.top_losers %}
+                        <tr>
+                            <td class="text-start">
+                                <span class="company-name">{{ row.symbol }}</span>
+                            </td>
+                            <td class="text-end fw-bold loss">{{ row.total_pl|floatformat:0|intcomma }}</td>
+                            <td class="text-end">{{ row.roi_individual|floatformat:2 }}%</td>
+                            <td class="text-end">{{ row.contribution_sector|floatformat:2 }}%</td>
+                            <td class="text-end">{{ row.contribution_total|floatformat:2 }}%</td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="5" class="text-center text-muted py-4">
+                                <i class="bi bi-inbox" style="font-size: 2rem;"></i>
+                                <div class="mt-2">No losses recorded</div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# --- 6. GETTING STARTED (if no transactions) --- #}
 {% if stats.total_transactions == 0 %}
 <div class="row mt-4">
     <div class="col-12">
-        <div class="card shadow-sm bg-light">
+        <div class="card getting-started-card shadow-sm">
             <div class="card-body p-4">
-                <h5 class="mb-3"><i class="bi bi-rocket text-primary"></i> Getting Started</h5>
-                <p class="mb-3">Follow these steps to set up your portfolio:</p>
+                <h5 class="mb-3">
+                    <i class="bi bi-rocket-takeoff-fill text-primary me-2"></i> 
+                    <strong>Getting Started</strong>
+                </h5>
+                <p class="mb-3">Follow these steps to set up your portfolio and start tracking your investments:</p>
                 <ol class="mb-0">
-                    <li class="mb-2">
-                        <strong>Add Companies</strong> - Go to <a href="/admin/listed_companies/companies/" target="_blank">Company Admin</a> 
-                        to ensure your scripts are listed.
-                    </li>
-                    <li class="mb-2">
-                        <strong>Add Transactions</strong> - Click <a href="{% url 'my_portfolio:transactions' %}">Add Transaction</a> 
-                        to record your buy/sell activities
-                    </li>
-                    <li>
-                        <strong>View Portfolio</strong> - Check your <a href="{% url 'my_portfolio:company_dashboard' %}">Portfolio Report</a> 
-                        to see your current holdings and investments
-                    </li>
+                    <li><strong><i class="bi bi-building me-2"></i>Add Companies</strong> - Ensure your scripts are listed in the system.</li>
+                    <li><strong><i class="bi bi-plus-circle me-2"></i>Add Transactions</strong> - Record your buy/sell activities.</li>
+                    <li><strong><i class="bi bi-eye me-2"></i>View Company Report</strong> - See your current holdings and performance.</li>
                 </ol>
             </div>
         </div>
     </div>
 </div>
 {% endif %}
+
 {% endblock %}

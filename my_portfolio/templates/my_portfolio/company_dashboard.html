@@ -1,15 +1,15 @@
 {% extends "base.html" %}
 {% load humanize %}
 
-{% block title %}Portfolio Report{% endblock %}
-{% block title_header %}<i class="bi bi-bar-chart"></i> Portfolio Report{% endblock %}
+{% block title %}Company Report{% endblock %}
+{% block title_header %}<i class="bi bi-bar-chart"></i> Company Report{% endblock %}
 
 {% block content %}
 <div class="card shadow-sm mb-4 border-0">
   <div class="card-body bg-light-subtle">
     <form id="stockLookupForm" method="GET" action="{% url 'my_portfolio:company_dashboard' %}" class="d-flex flex-wrap justify-content-between align-items-center gap-3">
       <div>
-        <h5 class="fw-semibold text-primary mb-1">Portfolio Report</h5>
+        <h5 class="fw-semibold text-primary mb-1">Company Report</h5>
         {% if company %}
           <div class="text-muted small">
             <strong>{{ company.symbol }}</strong> — {{ company.script }} <span class="badge bg-info-subtle text-dark ms-2">{{ company.sector }}</span>
@@ -50,9 +50,12 @@
       <div class="card-header bg-primary-subtle fw-semibold text-dark">
         <i class="bi bi-list-columns"></i> Transaction Details
       </div>
-      <div class="table-responsive">
-        <table class="table table-hover table-striped table-bordered table-sm mb-0 align-middle" style="font-size: 0.95rem;">
-          <thead class="table-primary text-center">
+      
+      <div class="table-responsive" style="max-height: 750px; overflow-y: auto;">
+        {# --- FIX 1: Removed 'table-striped' so colors show up clearly --- #}
+        <table class="table table-hover table-bordered table-sm mb-0 align-middle" style="font-size: 0.95rem;">
+          
+          <thead class="table-primary text-center" style="position: sticky; top: 0; z-index: 10; box-shadow: 0 2px 2px -1px rgba(0, 0, 0, 0.2);">
             <tr>
               <th>Unique ID</th>
               <th>Date</th>
@@ -69,7 +72,16 @@
           <tbody>
             {% if details %}
               {% for row in details|dictsortreversed:"date" %}
-                <tr class="{% if row.is_buy %}table-success-subtle{% elif row.is_sale %}table-danger-subtle{% endif %}">
+                {# --- FIX 1 Continued: Using stronger classes for visibility --- #}
+                <tr class="
+                  {% if row.type == 'BUY' or row.type == 'CONVERSION(+)' or row.type == 'SUSPENSE(+)' %}
+                    table-success
+                  {% elif row.type == 'SALE' or row.type == 'CONVERSION(-)' or row.type == 'SUSPENSE(-)' %}
+                    table-danger
+                  {% else %}
+                    bg-white
+                  {% endif %}
+                ">
                   <td><span class="badge bg-secondary">{{ row.unique_id }}</span></td>
                   <td>{{ row.date|date:"Y-m-d" }}</td>
                   <td>{{ row.type }}</td>
@@ -99,7 +111,7 @@
     </div>
     {% else %}
     <div class="alert alert-info text-center mt-4">
-      <h5>Welcome to the Portfolio Report</h5>
+      <h5>Welcome to the Company Report</h5>
       <p>Enter or select a stock symbol from the list to view its detailed report.</p>
     </div>
     {% endif %}
@@ -124,11 +136,12 @@
               </tr>
             </thead>
             <tbody>
-              <tr class="fw-bold table-primary">
-                <td>Closing Bal.</td>
-                <td class="text-end">{{ summary.closing_qty|intcomma }}</td>
-                <td class="text-end">{{ summary.closing_total_cost|floatformat:2|intcomma }}</td>
-                <td class="text-end">{{ summary.closing_avg_rate|floatformat:2|intcomma }}</td>
+              {# --- FIX: Custom Dark Yellow Background (#ffc107) and Dark Red Text --- #}
+              <tr class="fw-bold fs-5">
+                <td style="background-color: #ffc107 !important; color: #8B0000 !important;">Closing Bal.</td>
+                <td class="text-end" style="background-color: #ffc107 !important; color: #8B0000 !important;">{{ summary.closing_qty|intcomma }}</td>
+                <td class="text-end" style="background-color: #ffc107 !important; color: #8B0000 !important;">{{ summary.closing_total_cost|floatformat:2|intcomma }}</td>
+                <td class="text-end" style="background-color: #ffc107 !important; color: #8B0000 !important;">{{ summary.closing_avg_rate|floatformat:2|intcomma }}</td>
               </tr>
               <tr>
                 <td>Purchase</td>
@@ -163,7 +176,8 @@
             <small class="text-muted">
               Unrealized P/L
               {% if summary.latest_close_price %}
-                <span>(LTP @ {{ summary.latest_close_price|floatformat:2|intcomma }})</span>
+                <br>
+                <span>(LTP @ {{ summary.latest_close_price|floatformat:2|intcomma }} on {{ summary.latest_price_date|date:"M d, Y" }})</span>
               {% endif %}
             </small>
             <div class="input-group input-group-sm mt-2">
