@@ -1,0 +1,301 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}Valuation Report - Stock Portfolio{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* --- 1. CONTAINER & SCROLLING --- */
+    .table-container {
+        height: 78vh;
+        overflow-y: auto;
+        overflow-x: hidden;
+        border: 1px solid #dee2e6;
+        border-radius: 4px;
+        position: relative;
+        background: white;
+    }
+
+    /* --- 2. TABLE LAYOUT --- */
+    .valuation-table {
+        width: 100%;
+        table-layout: fixed;
+        font-size: 0.65rem;
+        border-collapse: separate; 
+        border-spacing: 0;
+    }
+
+    /* --- 3. STICKY HEADER --- */
+    .valuation-table thead th {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        background-color: #f8f9fa;
+        border-bottom: 1px solid #dee2e6;
+        box-shadow: 0 1px 0 #dee2e6;
+        text-align: center; /* Default Center */
+        vertical-align: middle;
+    }
+    
+    .valuation-table thead tr:nth-child(1) th { top: 0; }
+    .valuation-table thead tr:nth-child(2) th { top: 23px; }
+
+    /* --- 4. BORDERS & CELLS --- */
+    .valuation-table th, .valuation-table td {
+        padding: 3px 2px;
+        /* Standard Vertical Line */
+        border-right: 1px solid #dee2e6; 
+        border-bottom: 1px solid #e9ecef;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    
+    /* Remove right border for last col */
+    .valuation-table th:last-child, .valuation-table td:last-child { border-right: none; }
+
+    /* --- 5. BOLD VERTICAL SEPARATORS (SECTION DIVIDERS) --- */
+    /* Creates a bold line to the left of the element */
+    .border-thick-left {
+        border-left: 2px solid #6c757d !important; 
+    }
+
+    /* --- 6. ROW HIGHLIGHTING --- */
+    /* Sub Total (Gray) */
+    tr.sector-header td {
+        background-color: #dfe1e5 !important;
+        color: #212529;
+        font-weight: 800;
+        border-bottom: 1px solid #adb5bd;
+    }
+
+    /* Grand Total (Black) */
+    tfoot tr { background-color: #000000 !important; }
+    tfoot td {
+        background-color: #000000 !important;
+        color: #ffffff !important;
+        font-weight: 700;
+        border-color: #444 !important;
+        border-right: 1px solid #444;
+    }
+    /* Ensure thick borders appear on footer too */
+    tfoot td.border-thick-left {
+        border-left: 2px solid #6c757d !important;
+    }
+
+    /* --- 7. UTILITIES --- */
+    .bg-pl-profit { background-color: #d1e7dd !important; color: #0f5132; font-weight: 700; }
+    .bg-pl-loss { background-color: #f8d7da !important; color: #842029; font-weight: 700; }
+    
+    .fw-bold-num { font-weight: 700; }
+    .text-center-val { text-align: center !important; }
+    .text-left-force { text-align: left !important; padding-left: 4px; } /* For Symbol */
+    
+    /* Column Backgrounds */
+    .bg-op { background-color: #ffffff; }
+    .bg-buy { background-color: #f8fbff; }
+    .bg-bonus { background-color: #f9fffb; }
+    .bg-sale { background-color: #fff9fa; }
+    .bg-calc { background-color: #fffdf5; }
+    .bg-close { background-color: #f8f9fa; }
+    .bg-val { background-color: #f4fcff; } 
+
+</style>
+{% endblock %}
+
+{% block title_header %}
+<i class="bi bi-calculator"></i> Valuation Report
+{% endblock %}
+
+{% block content %}
+
+{# --- FILTER SECTION --- #}
+<div class="row mb-2">
+    <div class="col-12">
+        <div class="card shadow-sm border-0">
+            <div class="card-body p-2 d-flex justify-content-between align-items-center">
+                <div class="d-flex align-items-center gap-3">
+                    <a href="{% url 'my_portfolio:portfolio_home' %}" class="btn btn-light btn-sm border" title="Back to Dashboard">
+                        <i class="bi bi-arrow-left"></i> Back
+                    </a>
+                    <div>
+                        <h6 class="mb-0 fw-bold">Portfolio Valuation</h6>
+                        <span class="text-muted" style="font-size: 0.75rem;">
+                            {{ start_date|date:"M d, Y" }} <i class="bi bi-arrow-right small mx-1"></i> {{ end_date|date:"M d, Y" }}
+                        </span>
+                    </div>
+                </div>
+                <form method="get" class="d-flex gap-2 align-items-center">
+                    <div class="input-group input-group-sm">
+                        <span class="input-group-text bg-light py-0">From</span>
+                        <input type="date" name="start_date" class="form-control py-0" value="{{ start_date|date:'Y-m-d' }}">
+                    </div>
+                    <div class="input-group input-group-sm">
+                        <span class="input-group-text bg-light py-0">To</span>
+                        <input type="date" name="end_date" class="form-control py-0" value="{{ end_date|date:'Y-m-d' }}">
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-sm py-0 px-3"><i class="bi bi-filter"></i></button>
+                    
+                    <a href="{% url 'my_portfolio:download_valuation_report' %}?start_date={{ start_date|date:'Y-m-d' }}&end_date={{ end_date|date:'Y-m-d' }}" 
+                       class="btn btn-success btn-sm py-0 px-3 d-flex align-items-center gap-2" 
+                       title="Download Excel">
+                        <i class="bi bi-download"></i> Download
+                    </a>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# --- TABLE SECTION --- #}
+<div class="row g-0">
+    <div class="col-12">
+        <div class="table-container">
+            <table class="table valuation-table mb-0">
+                <colgroup>
+                    <col style="width: 2.5%;"> <col style="width: 4%;">   <col style="width: 6%;">   <col style="width: 3.5%;"> <col style="width: 3.5%;"> <col style="width: 4%;">
+                    <col style="width: 3.5%;"> <col style="width: 3.5%;"> <col style="width: 4%;">
+                    <col style="width: 3.5%;"> <col style="width: 3.5%;"> <col style="width: 4%;">
+                    <col style="width: 3.5%;"> <col style="width: 3.5%;"> <col style="width: 4%;">
+                    <col style="width: 4%;"> <col style="width: 4%;">
+                    <col style="width: 3.5%;"> <col style="width: 3.5%;"> <col style="width: 4.5%;">
+                    <col style="width: 3.5%;"> <col style="width: 5%;"> <col style="width: 4%;">
+                </colgroup>
+
+                <thead>
+                    <tr>
+                        <th rowspan="2">SN</th>
+                        <th rowspan="2" class="text-left-force">Sym</th>
+                        <th rowspan="2" class="text-left-force">Company</th>
+                        
+                        <th colspan="3" class="bg-op border-thick-left">Opening</th>
+                        <th colspan="3" class="bg-buy border-thick-left">Purchase</th>
+                        <th colspan="3" class="bg-bonus border-thick-left">Bonus</th>
+                        <th colspan="3" class="bg-sale border-thick-left">Sales</th>
+                        <th colspan="2" class="bg-calc border-thick-left">Perf.</th>
+                        <th colspan="3" class="bg-close border-thick-left">Closing</th>
+                        <th colspan="3" class="bg-val text-primary border-thick-left">Valuation</th>
+                    </tr>
+                    <tr>
+                        <th class="bg-op border-thick-left">Qty</th><th class="bg-op">Rate</th><th class="bg-op">Amt</th>
+                        <th class="bg-buy border-thick-left">Qty</th><th class="bg-buy">Rate</th><th class="bg-buy">Amt</th>
+                        <th class="bg-bonus border-thick-left">Qty</th><th class="bg-bonus">Rate</th><th class="bg-bonus">Amt</th>
+                        <th class="bg-sale border-thick-left">Qty</th><th class="bg-sale">Rate</th><th class="bg-sale">Amt</th>
+                        <th class="bg-calc border-thick-left">Cons</th><th class="bg-calc">P/L</th>
+                        <th class="bg-close border-thick-left">Qty</th><th class="bg-close">WACC</th><th class="bg-close">Cost</th>
+                        <th class="bg-val border-thick-left">LTP</th><th class="bg-val">Value</th><th class="bg-val">U.PL</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for sector, data in valuation_data.items %}
+                        {# --- SECTOR HEADER (GRAY SUB TOTAL) --- #}
+                        <tr class="sector-header">
+                            <td></td>
+                            <td class="text-left-force">{{ sector }}</td>
+                            <td class="text-center">Sub Total</td>
+                            
+                            <td class="text-center-val border-thick-left">{{ data.totals.op_kitta|intcomma }}</td>
+                            <td></td>
+                            <td class="text-center-val">{{ data.totals.op_amt }}</td>
+
+                            <td class="text-center-val border-thick-left">{{ data.totals.buy_kitta|intcomma }}</td>
+                            <td></td>
+                            <td class="text-center-val">{{ data.totals.buy_amt }}</td>
+
+                            <td class="text-center-val border-thick-left">{{ data.totals.bonus_kitta|intcomma }}</td>
+                            <td></td>
+                            <td class="text-center-val">{{ data.totals.bonus_amt }}</td>
+
+                            <td class="text-center-val border-thick-left">{{ data.totals.sale_kitta|intcomma }}</td>
+                            <td></td>
+                            <td class="text-center-val">{{ data.totals.sale_amt }}</td>
+
+                            <td class="text-center-val border-thick-left">{{ data.totals.consumption }}</td>
+                            <td class="text-center-val {% if "-" in data.totals.realized_pl %}text-danger{% else %}text-success{% endif %}">
+                                {{ data.totals.realized_pl }}
+                            </td>
+
+                            <td class="text-center-val border-thick-left">{{ data.totals.cl_kitta|intcomma }}</td>
+                            <td></td>
+                            <td class="text-center-val">{{ data.totals.cl_cost }}</td>
+
+                            <td></td>
+                            <td class="text-center-val border-thick-left text-primary">{{ data.totals.market_val }}</td>
+                            <td class="text-center-val {% if "-" in data.totals.unrealized_pl %}text-danger{% else %}text-success{% endif %}">
+                                {{ data.totals.unrealized_pl }}
+                            </td>
+                        </tr>
+                        
+                        {# --- ROWS --- #}
+                        {% for row in data.rows %}
+                        <tr>
+                            <td class="text-center text-muted">{{ row.sn }}</td>
+                            
+                            <td class="fw-bold text-left-force">{{ row.company }}</td>
+                            <td class="text-left-force text-truncate" style="max-width: 120px;" title="{{ row.company_name }}">
+                                {{ row.company_name }}
+                            </td>
+                            
+                            <td class="text-center-val bg-op border-thick-left">{{ row.op_kitta|default:"-" }}</td>
+                            <td class="text-center-val bg-op text-muted">{{ row.op_rate|floatformat:0 }}</td>
+                            <td class="text-center-val bg-op">{{ row.op_amt }}</td>
+                            
+                            <td class="text-center-val bg-buy fw-bold-num border-thick-left">{{ row.buy_kitta|default:"-" }}</td>
+                            <td class="text-center-val bg-buy text-muted">{{ row.buy_rate|floatformat:0 }}</td>
+                            <td class="text-center-val bg-buy">{{ row.buy_amt }}</td>
+                            
+                            <td class="text-center-val bg-bonus fw-bold-num border-thick-left">{{ row.bonus_kitta|default:"-" }}</td>
+                            <td class="text-center-val bg-bonus text-muted">{{ row.bonus_rate|floatformat:0 }}</td>
+                            <td class="text-center-val bg-bonus">{{ row.bonus_amt }}</td>
+                            
+                            <td class="text-center-val bg-sale fw-bold-num border-thick-left">{{ row.sale_kitta|default:"-" }}</td>
+                            <td class="text-center-val bg-sale text-muted">{{ row.sale_rate|floatformat:0 }}</td>
+                            <td class="text-center-val bg-sale">{{ row.sale_amt }}</td>
+                            
+                            <td class="text-center-val bg-calc border-thick-left">{{ row.consumption }}</td>
+                            <td class="text-center-val bg-calc fw-bold {% if "-" in row.realized_pl %}bg-pl-loss{% else %}bg-pl-profit{% endif %}">
+                                {{ row.realized_pl }}
+                            </td>
+                            
+                            <td class="text-center-val bg-close fw-bold-num border-thick-left">{{ row.cl_kitta|intcomma }}</td>
+                            <td class="text-center-val bg-close text-muted">{{ row.cl_rate|floatformat:0 }}</td>
+                            <td class="text-center-val bg-close fw-bold">{{ row.cl_cost }}</td>
+                            
+                            <td class="text-center-val bg-val text-primary border-thick-left">{{ row.ltp|floatformat:0 }}</td>
+                            <td class="text-center-val bg-val fw-bold">{{ row.market_val }}</td>
+                            <td class="text-center-val bg-val fw-bold {% if "-" in row.unrealized_pl %}bg-pl-loss{% else %}bg-pl-profit{% endif %}">
+                                {{ row.unrealized_pl }}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    {% endfor %}
+                </tbody>
+                
+                {# --- GRAND TOTAL (BLACK & WHITE) --- #}
+                <tfoot style="position: sticky; bottom: 0; z-index: 20;">
+                    <tr>
+                        <td></td>
+                        <td></td>
+                        <td class="text-end pe-2">GRAND TOTAL</td>
+                        
+                        <td class="text-center-val border-thick-left"></td> <td></td> <td class="text-center-val">{{ grand_totals.op_amt }}</td>
+                        <td class="text-center-val border-thick-left"></td> <td></td> <td class="text-center-val">{{ grand_totals.buy_amt }}</td>
+                        <td class="text-center-val border-thick-left"></td> <td></td> <td class="text-center-val">{{ grand_totals.bonus_amt }}</td>
+                        <td class="text-center-val border-thick-left"></td> <td></td> <td class="text-center-val">{{ grand_totals.sale_amt }}</td>
+                        
+                        <td class="border-thick-left"></td>
+                        <td class="text-center-val">{{ grand_totals.realized_pl }}</td>
+                        
+                        <td class="border-thick-left"></td> <td></td> <td class="text-center-val">{{ grand_totals.cl_cost }}</td>
+                        
+                        <td class="border-thick-left"></td>
+                        <td class="text-center-val">{{ grand_totals.market_val }}</td>
+                        <td class="text-center-val">{{ grand_totals.unrealized_pl }}</td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    </div>
+</div>
+
+{% endblock %}

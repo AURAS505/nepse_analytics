@@ -35,4 +35,6 @@ urlpatterns = [
     
     # /portfolio/api/company_details/HBL/
     path('api/company_details/<str:symbol>/', views.api_company_details, name='api_company_details'),
+    path('report/valuation/', views.valuation_report, name='valuation_report'),
+    path('report/valuation/download/', views.download_valuation_report, name='download_valuation_report'), # <--- ADD THIS
 ]
