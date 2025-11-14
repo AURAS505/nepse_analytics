@@ -51,5 +51,7 @@ urlpatterns = [
     # --- API Endpoints ---
     path('api/company_details/<str:symbol>/', views.api_company_details, name='api_company_details'),
     path('report/broker_ledger/', views.broker_ledger_report, name='broker_ledger_report'),
+    path('report/broker_ledger/download/', views.download_broker_ledger, name='download_broker_ledger'),
+    path('api/broker_settlement_summary/', views.api_broker_settlement_summary, name='api_broker_settlement_summary'),
     
 ]

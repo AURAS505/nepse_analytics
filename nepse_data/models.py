@@ -140,3 +140,46 @@ class Brokers(models.Model):
 
     def __str__(self):
         return f"{self.broker_no} - {self.name}"
+    
+
+
+# [Keep all your other models like StockPrices, Indices, Marcap, etc.]
+
+
+# --- NEW DIVIDEND HISTORY MODEL (Revised) ---
+class DividendHistory(models.Model):
+    id = models.AutoField(primary_key=True)
+    fiscal_year = models.CharField(max_length=20, blank=True, null=True)
+    symbol = models.CharField(max_length=20, db_index=True)
+    company_name = models.CharField(max_length=255, blank=True, null=True)
+    
+    bonus_percent = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
+    cash_percent = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
+    
+    # --- Field added as requested ---
+    tax_percent = models.DecimalField(
+        max_digits=10, 
+        decimal_places=2, 
+        blank=True, 
+        null=True, 
+        help_text="Tax for dividend purpose"
+    )
+    # --- End of added field ---
+    
+    total_percent = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
+    
+    announcement_date = models.DateField(blank=True, null=True)
+    book_closure_date = models.DateField(blank=True, null=True)
+    book_closure_status = models.CharField(max_length=50, blank=True, null=True)
+    distribution_date = models.DateField(blank=True, null=True)
+    bonus_listing_date = models.DateField(blank=True, null=True)
+
+    class Meta:
+        db_table = 'dividend_history'
+        verbose_name = 'Dividend History'
+        verbose_name_plural = 'Dividend Histories'
+        ordering = ['-announcement_date', 'symbol'] # Show newest first
+
+    def __str__(self):
+        return f"{self.symbol} - {self.fiscal_year} ({self.total_percent}%)"
+# --- END OF NEW MODEL ---

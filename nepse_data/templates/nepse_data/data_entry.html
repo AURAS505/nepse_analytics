@@ -179,6 +179,50 @@
                 </small>
             </div>
         </div>
+
+        <div class="card shadow-sm border-0 mt-5">
+            <div class="card-header bg-secondary text-white">
+                <h5 class="mb-0">Upload Dividend History (Excel/CSV)</h5>
+            </div>
+            <div class="card-body p-4">
+                <p class="card-text">
+                    Upload a bulk file, or click "Manage Entries" to add, edit, delete, 
+                    or clear individual dividend records.
+                </p>
+
+                <div class="text-end mb-3">
+                    <a href="{% url 'nepse_data:download_dividend_sample' %}" class="btn btn-sm btn-outline-info">
+                        <i class="bi bi-file-earmark-arrow-down"></i> Download Sample CSV
+                    </a>
+                </div>
+                <hr class="mt-0">
+
+                <form method="POST" action="{% url 'nepse_data:data_entry' %}" enctype="multipart/form-data" class="needs-validation" novalidate>
+                    {% csrf_token %}
+                    <div class="row g-3">
+                        <div class="col-md-12">
+                            <label for="dividend_file" class="form-label"><b>Upload File</b></label>
+                            <input class="form-control" type="file" id="dividend_file" name="dividend_file" accept=".csv,.xlsx,.xls">
+                        </div>
+                    </div>
+                    <div class="text-end mt-4">
+                        <button type="submit" name="action" value="upload_dividend" class="btn btn-secondary btn-lg ms-2">
+                            <i class="bi bi-upload"></i> Upload File
+                        </button>
+                    </div>
+                </form>
+
+                <hr>
+                
+                <div class="text-end">
+                    <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#manageDividendModal">
+                        <i class="bi bi-pencil-square"></i> Manage Entries
+                    </button>
+                </div>
+
+            </div>
+        </div>
+
         <div class="card shadow-sm border-0 mt-5">
             <div class="card-header bg-warning">
                 <h5 class="mb-0">Recalculate All Adjusted Prices</h5>
@@ -306,6 +350,250 @@
         </div>
     </div>
 </div>
+<div class="modal fade" id="manageDividendModal" tabindex="-1" aria-labelledby="manageDividendModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="manageDividendModalLabel">Manage Dividend Entries</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="d-flex justify-content-end mb-3">
+                    <button type="button" class="btn btn-success me-2" data-bs-toggle="modal" data-bs-target="#addDividendModal">
+                        <i class="bi bi-plus-circle"></i> Add New Entry
+                    </button>
+                    <button type="button" class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#deleteAllModal">
+                        <i class="bi bi-trash-fill"></i> Delete All Records
+                    </button>
+                </div>
+
+                <div class="input-group mb-3">
+                    <input type="text" id="dividend-search-input" class="form-control" placeholder="Search by Symbol or 'Symbol FY' (e.g., NABIL 2079/80)">
+                    <button class="btn btn-outline-secondary" type="button" id="dividend-search-btn">
+                        <i class="bi bi-search"></i> Search
+                    </button>
+                </div>
+
+                <div id="dividend-search-results">
+                    <p class="text-muted text-center">Enter a search term to find records to edit or delete.</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="addDividendModal" tabindex="-1" aria-labelledby="addDividendModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form id="addDividendForm" method="POST" action="{% url 'nepse_data:add_dividend' %}">
+                {% csrf_token %}
+                <div class="modal-header">
+                    <h5 class="modal-title" id="addDividendModalLabel">Add New Dividend Entry</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Enter the details for the new dividend record.</p>
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="add_fiscal_year" class="form-label">Fiscal Year</label>
+                                <input type="text" class="form-control" id="add_fiscal_year" name="fiscal_year" placeholder="e.g., 2079/80">
+                            </div>
+                            <div class="mb-3">
+                                <label for="add_symbol" class="form-label">Symbol</label>
+                                <input type="text" class="form-control" id="add_symbol" name="symbol" placeholder="e.g., NIFRA" required>
+                            </div>
+                            <div class="mb-3">
+                                <label for="add_company_name" class="form-label">Company Name</label>
+                                <input type="text" class="form-control" id="add_company_name" name="company_name" placeholder="(Optional)">
+                            </div>
+                            <div class="mb-3">
+                                <label for="add_book_closure_status" class="form-label">Book Closure Status</label>
+                                <input type="text" class="form-control" id="add_book_closure_status" name="book_closure_status" placeholder="e.g., Posted">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="row">
+                                <div class="col-6 mb-3">
+                                    <label for="add_bonus_percent" class="form-label">Bonus %</label>
+                                    <input type="number" step="0.01" class="form-control" id="add_bonus_percent" name="bonus_percent" placeholder="0.00">
+                                </div>
+                                <div class="col-6 mb-3">
+                                    <label for="add_cash_percent" class="form-label">Cash %</label>
+                                    <input type="number" step="0.01" class="form-control" id="add_cash_percent" name="cash_percent" placeholder="0.00">
+                                </div>
+                                <div class="col-6 mb-3">
+                                    <label for="add_tax_percent" class="form-label">Tax %</label>
+                                    <input type="number" step="0.01" class="form-control" id="add_tax_percent" name="tax_percent" placeholder="0.00">
+                                </div>
+                                <div class="col-6 mb-3">
+                                    <label for="add_total_percent" class="form-label">Total %</label>
+                                    <input type="number" step="0.01" class="form-control" id="add_total_percent" name="total_percent" placeholder="0.00">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <div class="row">
+                                <div class="col-md-3 mb-3">
+                                    <label for="add_announcement_date" class="form-label">Announcement</label>
+                                    <input type="date" class="form-control" id="add_announcement_date" name="announcement_date">
+                                </div>
+                                <div class="col-md-3 mb-3">
+                                    <label for="add_book_closure_date" class="form-label">Book Closure</label>
+                                    <input type="date" class="form-control" id="add_book_closure_date" name="book_closure_date">
+                                </div>
+                                <div class="col-md-3 mb-3">
+                                    <label for="add_distribution_date" class="form-label">Distribution</label>
+                                    <input type="date" class="form-control" id="add_distribution_date" name="distribution_date">
+                                </div>
+                                <div class="col-md-3 mb-3">
+                                    <label for="add_bonus_listing_date" class="form-label">Bonus Listing</label>
+                                    <input type="date" class="form-control" id="add_bonus_listing_date" name="bonus_listing_date">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Back to Manage</button>
+                    <button type="submit" class="btn btn-primary">Save Entry</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="editDividendModal" tabindex="-1" aria-labelledby="editDividendModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form id="editDividendForm" method="POST" action="">
+                {% csrf_token %}
+                <div class="modal-header">
+                    <h5 class="modal-title" id="editDividendModalLabel">Edit Dividend Entry</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p>You are editing entry <strong id="edit-id-display"></strong> for symbol <strong id="edit-symbol-display"></strong>.</p>
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="edit_fiscal_year" class="form-label">Fiscal Year</label>
+                                <input type="text" class="form-control" id="edit_fiscal_year" name="fiscal_year">
+                            </div>
+                            <div class="mb-3">
+                                <label for="edit_symbol" class="form-label">Symbol</label>
+                                <input type="text" class="form-control" id="edit_symbol" name="symbol">
+                            </div>
+                            <div class="mb-3">
+                                <label for="edit_company_name" class="form-label">Company Name</label>
+                                <input type="text" class="form-control" id="edit_company_name" name="company_name">
+                            </div>
+                            <div class="mb-3">
+                                <label for="edit_book_closure_status" class="form-label">Book Closure Status</label>
+                                <input type="text" class="form-control" id="edit_book_closure_status" name="book_closure_status">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="row">
+                                <div class="col-6 mb-3">
+                                    <label for="edit_bonus_percent" class="form-label">Bonus %</label>
+                                    <input type="number" step="0.01" class="form-control" id="edit_bonus_percent" name="bonus_percent">
+                                </div>
+                                <div class="col-6 mb-3">
+                                    <label for="edit_cash_percent" class="form-label">Cash %</label>
+                                    <input type="number" step="0.01" class="form-control" id="edit_cash_percent" name="cash_percent">
+                                </div>
+                                <div class="col-6 mb-3">
+                                    <label for="edit_tax_percent" class="form-label">Tax %</label>
+                                    <input type="number" step="0.01" class="form-control" id="edit_tax_percent" name="tax_percent">
+                                </div>
+                                <div class="col-6 mb-3">
+                                    <label for="edit_total_percent" class="form-label">Total %</label>
+                                    <input type="number" step="0.01" class="form-control" id="edit_total_percent" name="total_percent">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <div class="row">
+                                <div class="col-md-3 mb-3">
+                                    <label for="edit_announcement_date" class="form-label">Announcement</label>
+                                    <input type="date" class="form-control" id="edit_announcement_date" name="announcement_date">
+                                </div>
+                                <div class="col-md-3 mb-3">
+                                    <label for="edit_book_closure_date" class="form-label">Book Closure</label>
+                                    <input type="date" class="form-control" id="edit_book_closure_date" name="book_closure_date">
+                                </div>
+                                <div class="col-md-3 mb-3">
+                                    <label for="edit_distribution_date" class="form-label">Distribution</label>
+                                    <input type="date" class="form-control" id="edit_distribution_date" name="distribution_date">
+                                </div>
+                                <div class="col-md-3 mb-3">
+                                    <label for="edit_bonus_listing_date" class="form-label">Bonus Listing</label>
+                                    <input type="date" class="form-control" id="edit_bonus_listing_date" name="bonus_listing_date">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Back to Manage</button>
+                    <button type="submit" class="btn btn-primary">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="deleteDividendModal" tabindex="-1" aria-labelledby="deleteDividendModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form id="deleteDividendForm" method="POST" action="">
+                {% csrf_token %}
+                <div class="modal-header">
+                    <h5 class="modal-title" id="deleteDividendModalLabel">Confirm Deletion</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Are you sure you want to permanently delete the dividend entry for
+                       <strong id="delete-symbol-display"></strong> 
+                       (FY: <strong id="delete-fy-display"></strong>)?</p>
+                    <p class="text-danger">This action cannot be undone.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-danger">Confirm Delete</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="deleteAllModal" tabindex="-1" aria-labelledby="deleteAllModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form id="deleteAllForm" method="POST" action="{% url 'nepse_data:delete_all_dividends' %}">
+                {% csrf_token %}
+                <div class="modal-header">
+                    <h5 class="modal-title" id="deleteAllModalLabel">Confirm Delete All</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="fs-5 text-danger fw-bold">WARNING!</p>
+                    <p>Are you absolutely sure you want to permanently delete <strong>ALL</strong>
+                       dividend history records from the database?</p>
+                    <p class="text-danger">This action cannot be undone.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-danger">Confirm Delete All</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 
@@ -314,7 +602,12 @@
 {
     "startRecalc": "{% url 'adjustments_stock_price:start_recalc' %}",
     "recalcStatus": "/adjustments/recalc-status/",
-    "clearJob": "/adjustsments/clear-job/"
+    "clearJob": "/adjustsments/clear-job/",
+    
+    "dividendEdit": "{% url 'nepse_data:edit_dividend' pk=0 %}",
+    "dividendDelete": "{% url 'nepse_data:delete_dividend' pk=0 %}",
+
+    "companyLookup": "{% url 'nepse_data:company_lookup_json' %}"
 }
 </script>
 
@@ -466,4 +759,190 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 </script>
 
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    
+    // --- Store all modals in variables ---
+    const manageModalEl = document.getElementById('manageDividendModal');
+    const addModalEl = document.getElementById('addDividendModal');
+    const editModalEl = document.getElementById('editDividendModal');
+    const deleteModalEl = document.getElementById('deleteDividendModal');
+    
+    // --- Ensure modals return to the main 'Manage' modal ---
+    [addModalEl, editModalEl, deleteModalEl].forEach(modalEl => {
+        if (modalEl) {
+            modalEl.addEventListener('hidden.bs.modal', function(event) {
+                // If we are not closing the main modal itself...
+                if (!document.body.classList.contains('modal-open')) {
+                    // Re-open the main manage modal
+                    const manageModal = new bootstrap.Modal(manageModalEl);
+                    manageModal.show();
+                }
+            });
+        }
+    });
+    // When the manage modal itself closes, we need to clear its state
+    manageModalEl.addEventListener('hidden.bs.modal', function() {
+        // Clear search results to be fresh next time
+        document.getElementById('dividend-search-results').innerHTML = '<p class="text-muted text-center">Enter a search term...</p>';
+        document.getElementById('dividend-search-input').value = '';
+    });
+
+
+    // --- 1. Search Logic ---
+    const searchBtn = document.getElementById('dividend-search-btn');
+    const searchInput = document.getElementById('dividend-search-input');
+    const searchResultsDiv = document.getElementById('dividend-search-results');
+    
+    const runSearch = () => {
+        const term = searchInput.value;
+        if (term.length < 2) {
+            searchResultsDiv.innerHTML = '<p class="text-danger text-center">Please enter at least 2 characters.</p>';
+            return;
+        }
+
+        searchResultsDiv.innerHTML = '<p class="text-muted text-center">Searching...</p>';
+        
+        fetch(`{% url 'nepse_data:search_dividends_json' %}?term=${encodeURIComponent(term)}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.results && data.results.length > 0) {
+                    let html = '<ul class="list-group" id="dividend-results-list">';
+                    data.results.forEach(item => {
+                        html += `
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                <div>
+                                    <strong class="text-primary">${item.symbol}</strong>
+                                    <small class="text-muted">(${item.fiscal_year})</small>
+                                </div>
+                                <div>
+                                    <button class="btn btn-sm btn-outline-primary manage-edit-btn" 
+                                            data-bs-toggle="modal" 
+                                            data-bs-target="#editDividendModal"
+                                            data-item='${JSON.stringify(item)}'>
+                                        <i class="bi bi-pencil-square"></i> Edit
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-danger manage-delete-btn" 
+                                            data-bs-toggle="modal" 
+                                            data-bs-target="#deleteDividendModal"
+                                            data-id="${item.id}"
+                                            data-symbol="${item.symbol}"
+                                            data-fy="${item.fiscal_year}">
+                                        <i class="bi bi-trash"></i> Delete
+                                    </button>
+                                </div>
+                            </li>
+                        `;
+                    });
+                    html += '</ul>';
+                    searchResultsDiv.innerHTML = html;
+                } else {
+                    searchResultsDiv.innerHTML = '<p class="text-danger text-center">No results found.</p>';
+                }
+            })
+            .catch(error => {
+                console.error('Search error:', error);
+                searchResultsDiv.innerHTML = '<p class="text-danger text-center">An error occurred during search.</p>';
+            });
+    };
+
+    searchBtn.addEventListener('click', runSearch);
+    searchInput.addEventListener('keyup', (event) => {
+        if (event.key === 'Enter') {
+            runSearch();
+        }
+    });
+
+    // --- 2. Event Delegation for dynamic Edit/Delete buttons ---
+    searchResultsDiv.addEventListener('click', function(event) {
+        const button = event.target.closest('button');
+        if (!button) return;
+
+        // --- Handle Edit Button Click ---
+        if (button.classList.contains('manage-edit-btn')) {
+            const itemData = JSON.parse(button.getAttribute('data-item'));
+            const form = editModalEl.querySelector('#editDividendForm');
+            
+            // Populate form
+            form.querySelector('#edit_fiscal_year').value = itemData.fiscal_year || '';
+            form.querySelector('#edit_symbol').value = itemData.symbol || '';
+            form.querySelector('#edit_company_name').value = itemData.company_name || '';
+            form.querySelector('#edit_book_closure_status').value = itemData.book_closure_status || '';
+            form.querySelector('#edit_bonus_percent').value = itemData.bonus_percent || '';
+            form.querySelector('#edit_cash_percent').value = itemData.cash_percent || '';
+            form.querySelector('#edit_tax_percent').value = itemData.tax_percent || '';
+            form.querySelector('#edit_total_percent').value = itemData.total_percent || '';
+            form.querySelector('#edit_announcement_date').value = itemData.announcement_date || '';
+            form.querySelector('#edit_book_closure_date').value = itemData.book_closure_date || '';
+            form.querySelector('#edit_distribution_date').value = itemData.distribution_date || '';
+            form.querySelector('#edit_bonus_listing_date').value = itemData.bonus_listing_date || '';
+            
+            // Set form action and labels
+            form.action = URLS.dividendEdit.replace('0', itemData.id); // <-- This is the fix
+            editModalEl.querySelector('#edit-id-display').textContent = itemData.id;
+            editModalEl.querySelector('#edit-symbol-display').textContent = itemData.symbol;
+        }
+
+        // --- Handle Delete Button Click ---
+        if (button.classList.contains('manage-delete-btn')) {
+            const dividendId = button.getAttribute('data-id');
+            const symbol = button.getAttribute('data-symbol');
+            const fy = button.getAttribute('data-fy');
+            const form = deleteModalEl.querySelector('#deleteDividendForm');
+
+            form.action = URLS.dividendDelete.replace('0', dividendId); // <-- This is the fix
+            deleteModalEl.querySelector('#delete-symbol-display').textContent = symbol;
+            deleteModalEl.querySelector('#delete-fy-display').textContent = fy;
+        }
+    const URLS = JSON.parse(document.getElementById('js-urls').textContent);
+    const fetchCompanyName = (symbolInput, companyNameInput) => {
+        const symbol = symbolInput.value.trim().toUpperCase();
+        if (symbol.length < 2) {
+            // Don't search if the symbol is too short
+            return;
+        }
+
+        fetch(`${URLS.companyLookup}?symbol=${encodeURIComponent(symbol)}`)
+            .then(response => {
+                if (response.ok) {
+                    return response.json();
+                }
+                return { company_name: '' }; // Default on error
+            })
+            .then(data => {
+                // Set the value. If not found, data.company_name will be ''
+                // This allows the user to type a name manually if it's not found.
+                if (data.company_name) {
+                    companyNameInput.value = data.company_name;
+                }
+            })
+            .catch(error => {
+                console.error('Company lookup error:', error);
+            });
+    };
+
+    // --- Attach listeners to both 'Add' and 'Edit' modals ---
+    
+    // 'Add' Modal
+    const addSymbolInput = document.getElementById('add_symbol');
+    const addCompanyNameInput = document.getElementById('add_company_name');
+    if (addSymbolInput) {
+        // 'change' event fires when the user clicks or tabs out of the field
+        addSymbolInput.addEventListener('change', () => {
+            fetchCompanyName(addSymbolInput, addCompanyNameInput);
+        });
+    }
+
+    // 'Edit' Modal
+    const editSymbolInput = document.getElementById('edit_symbol');
+    const editCompanyNameInput = document.getElementById('edit_company_name');
+    if (editSymbolInput) {
+        editSymbolInput.addEventListener('change', () => {
+            fetchCompanyName(editSymbolInput, editCompanyNameInput);
+        });
+    }
+
+});
+</script>
 {% endblock %}

@@ -36,6 +36,12 @@ from io import TextIOWrapper, BytesIO # needed for file handling
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from datetime import datetime, date # needed for datetime.strptime
 from nepse_data.models import Brokers # Brokers model is crucial
+from django.db.models import Sum # We'll need this for the opening balance
+from django.http import JsonResponse
+from django.db.models import Sum, Q, F, DecimalField
+from django.db.models.functions import Coalesce
+from datetime import date, timedelta
+from django.db.models import Min, Max
 
 # --- Helper Functions ---
 
@@ -1198,10 +1204,10 @@ def get_broker_rp_entries(broker_no):
         
     return rp_entries
 
-def _get_broker_ledger_data(broker_no):
+def _get_broker_ledger_data(broker_no, sort='asc'):
     """
-    Helper function to fetch, merge, and process all transactions
-    for a single broker and return a ledger.
+    Helper function to fetch and process all transactions for a broker.
+    Now includes Opening Balance logic and Sorting.
     """
     
     # 1. Get all Cash R/P entries
@@ -1209,22 +1215,26 @@ def _get_broker_ledger_data(broker_no):
         broker__broker_no=broker_no
     ).order_by('date', 'created_at')
 
-    # 2. Get all Stock S/P entries
+    # 2. Separate Opening Balance (Balance b/d) entries
+    ob_entries = cash_txns.filter(action='Balance b/d')
+    other_cash_txns = cash_txns.exclude(action='Balance b/d')
+    
+    # Calculate the starting Opening Balance
+    opening_balance = ob_entries.aggregate(Sum('amount'))['amount__sum'] or Decimal('0.0')
+
+    # 3. Get all Stock S/P entries
     stock_txns = Transaction.objects.filter(
         broker=str(broker_no) 
     ).select_related('symbol').order_by('date', 'created_at')
 
-    # 3. Normalize and merge
+    # 4. Normalize and merge all OTHER entries
     all_entries = []
     
-    # Add Cash Entries
-    for txn in cash_txns:
+    # Add other Cash Entries
+    for txn in other_cash_txns:
         amount = txn.amount
         is_debit = False
-        if txn.action in ['Receipt', 'Misc(+)']:
-            is_debit = True
-        elif txn.action == 'Balance b/d':
-            is_debit = (amount >= 0)
+        if txn.action in ['Receipt', 'Misc(+)']: is_debit = True
         
         all_entries.append({
             'date': txn.date,
@@ -1238,31 +1248,25 @@ def _get_broker_ledger_data(broker_no):
     for txn in stock_txns:
         amount = txn.billed_amount or Decimal('0.0')
         if txn.transaction_type in ['SALE', 'CONVERSION(-)', 'SUSPENSE(-)']:
-            # Sale = Cash In = DEBIT
             all_entries.append({
                 'date': txn.date,
                 'description': f"Stock {txn.transaction_type} of {txn.symbol.script_ticker} ({txn.kitta} kitta)",
-                'source': 'STOCK',
-                'debit': amount,
-                'credit': Decimal('0.00')
+                'source': 'STOCK', 'debit': amount, 'credit': Decimal('0.00')
             })
         elif txn.transaction_type in ['BUY', 'IPO', 'RIGHT', 'CONVERSION(+)', 'SUSPENSE(+)']:
-            # Buy = Cash Out = CREDIT
             all_entries.append({
                 'date': txn.date,
                 'description': f"Stock {txn.transaction_type} of {txn.symbol.script_ticker} ({txn.kitta} kitta)",
-                'source': 'STOCK',
-                'debit': Decimal('0.00'),
-                'credit': amount
+                'source': 'STOCK', 'debit': Decimal('0.00'), 'credit': amount
             })
             
-    # 4. Sort all entries
-    all_entries.sort(key=lambda x: x['date'])
+    # 5. Sort all entries by date (ASC or DESC)
+    all_entries.sort(key=lambda x: x['date'], reverse=(sort == 'desc'))
 
-    # 5. Calculate running balance and totals
-    running_balance = Decimal('0.00')
-    total_debit = Decimal('0.00')
-    total_credit = Decimal('0.00')
+    # 6. Calculate running balance and totals (starting from the OB)
+    running_balance = opening_balance
+    total_debit = Decimal('0.00')    # Totals for *non-OB* transactions
+    total_credit = Decimal('0.00')   # Totals for *non-OB* transactions
     ledger = []
 
     for entry in all_entries:
@@ -1273,40 +1277,258 @@ def _get_broker_ledger_data(broker_no):
         entry['running_balance'] = running_balance
         ledger.append(entry)
 
-    # 6. Return all processed data
+    # 7. Return all processed data
     return {
+        'opening_balance': opening_balance,
         'ledger': ledger,
         'total_debit': total_debit,
         'total_credit': total_credit,
-        'final_balance': running_balance
+        'final_balance': running_balance  # This is now the true final balance
     }
 
 @login_required
 def broker_ledger_report(request):
-    # 1. Get all brokers for the filter dropdown
-    all_brokers = Brokers.objects.all().order_by('broker_no')
     
-    # 2. Get the selected broker from the URL (e.g., ?broker=45)
+    # 1. Get ONLY brokers who have transactions
+    rp_brokers = set(BrokerTransaction.objects.values_list('broker__broker_no', flat=True).distinct())
+    sp_brokers_str = set(Transaction.objects.values_list('broker', flat=True).distinct())
+    sp_brokers = {int(b) for b in sp_brokers_str if b and b.isdigit()}
+    
+    active_broker_nos = rp_brokers.union(sp_brokers)
+    all_brokers = Brokers.objects.filter(broker_no__in=active_broker_nos).order_by('broker_no')
+    
+    # 2. Get filter/pagination parameters
     selected_broker_no = request.GET.get('broker', '')
-    
+    current_sort = request.GET.get('sort', 'asc')
+    current_rows = request.GET.get('rows', '50')
+    rows_options = ['50', '100', '200', 'all']
+
     ledger_data = None
     broker = None
+    page_obj = None
+    is_paginated = False
 
     # 3. If a broker was selected, get their data
     if selected_broker_no:
         try:
             broker = get_object_or_404(Brokers, broker_no=selected_broker_no)
-            # 4. Call the helper function to get the ledger
-            ledger_data = _get_broker_ledger_data(selected_broker_no)
+            
+            # 4. Call the helper function to get all ledger data (unpaginated)
+            ledger_data = _get_broker_ledger_data(selected_broker_no, current_sort)
+            
+            # 5. Paginate the results
+            ledger_list = ledger_data['ledger']
+            if current_rows != 'all':
+                paginator = Paginator(ledger_list, int(current_rows))
+                page_num = request.GET.get('page', 1)
+                is_paginated = True
+                try:
+                    page_obj = paginator.page(page_num)
+                except PageNotAnInteger:
+                    page_obj = paginator.page(1)
+                except EmptyPage:
+                    page_obj = paginator.page(paginator.num_pages)
+            else:
+                page_obj = ledger_list # Not paginated
+
         except:
             messages.error(request, f"Broker {selected_broker_no} not found.")
             
-    # 5. Pass everything to the template
+    # 6. Create filter_params to preserve state in links
+    filter_params = f"&broker={selected_broker_no}&sort={current_sort}&rows={current_rows}"
+    
+    # 7. Pass everything to the template
     context = {
         'all_brokers': all_brokers,
         'selected_broker_no': selected_broker_no,
         'broker': broker,
-        'ledger_data': ledger_data  # This will contain the ledger, totals, etc.
+        'ledger_data': ledger_data,  # Contains totals
+        'page_obj': page_obj,        # Contains the paginated list of entries
+        'is_paginated': is_paginated,
+        'current_sort': current_sort,
+        'current_rows': current_rows,
+        'rows_options': rows_options,
+        'filter_params': filter_params # For pagination links
     }
     
     return render(request, 'my_portfolio/broker_ledger_report.html', context)
+
+
+@login_required
+def download_broker_ledger(request):
+    broker_no = request.GET.get('broker', '')
+    sort = request.GET.get('sort', 'asc')
+
+    if not broker_no:
+        messages.error(request, "No broker selected for download.")
+        return redirect('my_portfolio:broker_ledger_report')
+
+    try:
+        broker = get_object_or_404(Brokers, broker_no=broker_no)
+        
+        # 1. Get all data (unpaginated)
+        ledger_data = _get_broker_ledger_data(broker_no, sort)
+        
+        # 2. Create CSV response
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = f'attachment; filename="ledger_{broker_no}_{broker.name}.csv"'
+        
+        writer = csv.writer(response)
+        
+        # Write headers
+        writer.writerow(['Date', 'Source', 'Description', 'Debit (DR)', 'Credit (CR)', 'Balance'])
+        
+        # Write Opening Balance
+        writer.writerow(['', '', 'Opening Balance', '', '', ledger_data['opening_balance']])
+        
+        # Write ledger rows
+        for entry in ledger_data['ledger']:
+            writer.writerow([
+                entry['date'],
+                entry['source'],
+                entry['description'],
+                entry['debit'],
+                entry['credit'],
+                entry['running_balance']
+            ])
+            
+        # Write totals
+        writer.writerow([])
+        writer.writerow(['', '', 'Total (Excl. OB)', ledger_data['total_debit'], ledger_data['total_credit'], ''])
+        writer.writerow(['', '', 'Final Balance', '', '', ledger_data['final_balance']])
+        
+        return response
+
+    except Exception as e:
+        messages.error(request, f"Error generating download: {e}")
+        return redirect('my_portfolio:broker_ledger_report')
+    
+
+@login_required
+def api_broker_settlement_summary(request):
+    try:
+        # 1. Get parameters
+        start_date_str = request.GET.get('start_date')
+        end_date_str = request.GET.get('end_date')
+        sort_by = request.GET.get('sort_by', 'final_balance')
+        sort_dir = request.GET.get('sort_dir', 'desc')
+        
+        # --- Default Date Logic (Find min/max dates) ---
+        rp_dates = BrokerTransaction.objects.aggregate(min_date=Min('date'), max_date=Max('date'))
+        sp_dates = Transaction.objects.aggregate(min_date=Min('date'), max_date=Max('date'))
+
+        default_start_date = date.today()
+        if rp_dates['min_date'] and sp_dates['min_date']:
+            default_start_date = min(rp_dates['min_date'], sp_dates['min_date'])
+        elif rp_dates['min_date']:
+            default_start_date = rp_dates['min_date']
+        elif sp_dates['min_date']:
+            default_start_date = sp_dates['min_date']
+
+        default_end_date = date.today()
+        if rp_dates['max_date'] and sp_dates['max_date']:
+            default_end_date = max(rp_dates['max_date'], sp_dates['max_date'])
+        elif rp_dates['max_date']:
+            default_end_date = rp_dates['max_date']
+        elif sp_dates['max_date']:
+            default_end_date = sp_dates['max_date']
+
+        start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date() if start_date_str else default_start_date
+        end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date() if end_date_str else default_end_date
+        # --- End Date Logic ---
+        
+        # 2. Get all active brokers
+        rp_brokers = set(BrokerTransaction.objects.values_list('broker__broker_no', flat=True).distinct())
+        sp_brokers_str = set(Transaction.objects.values_list('broker', flat=True).distinct())
+        sp_brokers = {int(b) for b in sp_brokers_str if b and b.isdigit()}
+        active_broker_nos = rp_brokers.union(sp_brokers)
+        
+        brokers = Brokers.objects.filter(broker_no__in=active_broker_nos)
+        
+        # 3. Define transaction types
+        CASH_DEBIT_ACTIONS = ['Receipt', 'Misc(+)']
+        CASH_CREDIT_ACTIONS = ['Payment', 'Chq Issue', 'Pledge Charge', 'Misc(-)']
+        STOCK_DEBIT_TYPES = ['SALE', 'CONVERSION(-)', 'SUSPENSE(-)']
+        STOCK_CREDIT_TYPES = ['BUY', 'IPO', 'RIGHT', 'CONVERSION(+)', 'SUSPENSE(+)']
+
+        # 4. Calculate for each broker
+        summary_list = []
+        for broker in brokers:
+            broker_no = broker.broker_no
+            broker_no_str = str(broker_no)
+
+            # --- Opening Balance (all txns before start_date) ---
+            cash_ob_txns = BrokerTransaction.objects.filter(broker__broker_no=broker_no, date__lt=start_date)
+            cash_ob_balance_bd = cash_ob_txns.filter(action='Balance b/d').aggregate(total=Coalesce(Sum('amount'), Decimal(0)))['total']
+            cash_ob_debit = cash_ob_txns.filter(action__in=CASH_DEBIT_ACTIONS).aggregate(total=Coalesce(Sum('amount'), Decimal(0)))['total']
+            cash_ob_credit = cash_ob_txns.filter(action__in=CASH_CREDIT_ACTIONS).aggregate(total=Coalesce(Sum('amount'), Decimal(0)))['total']
+            op_balance_cash = cash_ob_balance_bd + cash_ob_debit - cash_ob_credit
+            
+            stock_ob_debit = Transaction.objects.filter(
+                broker=broker_no_str, transaction_type__in=STOCK_DEBIT_TYPES, date__lt=start_date
+            ).aggregate(total=Coalesce(Sum('billed_amount'), Decimal(0)))['total']
+            stock_ob_credit = Transaction.objects.filter(
+                broker=broker_no_str, transaction_type__in=STOCK_CREDIT_TYPES, date__lt=start_date
+            ).aggregate(total=Coalesce(Sum('billed_amount'), Decimal(0)))['total']
+            op_balance_stock = stock_ob_debit - stock_ob_credit
+            op_balance = op_balance_cash + op_balance_stock
+            
+            # --- Period Movements (between start_date and end_date) ---
+            
+            # A. Total Receipt (Cash In)
+            total_cash_debit = BrokerTransaction.objects.filter(
+                broker__broker_no=broker_no, date__range=[start_date, end_date], action__in=CASH_DEBIT_ACTIONS
+            ).aggregate(total=Coalesce(Sum('amount'), Decimal(0)))['total']
+            
+            # B. Total Sale (Stock In)
+            total_stock_debit = Transaction.objects.filter(
+                broker=broker_no_str, transaction_type__in=STOCK_DEBIT_TYPES, date__range=[start_date, end_date]
+            ).aggregate(total=Coalesce(Sum('billed_amount'), Decimal(0)))['total']
+
+            # C. Total Payment (Cash Out)
+            total_cash_credit = BrokerTransaction.objects.filter(
+                broker__broker_no=broker_no, date__range=[start_date, end_date], action__in=CASH_CREDIT_ACTIONS
+            ).aggregate(total=Coalesce(Sum('amount'), Decimal(0)))['total']
+            
+            # D. Total Buy (Stock Out)
+            total_stock_credit = Transaction.objects.filter(
+                broker=broker_no_str, transaction_type__in=STOCK_CREDIT_TYPES, date__range=[start_date, end_date]
+            ).aggregate(total=Coalesce(Sum('billed_amount'), Decimal(0)))['total']
+            
+            # E. Final Balance
+            final_balance = op_balance + (total_cash_debit + total_stock_debit) - (total_cash_credit + total_stock_credit)
+            
+            # --- UPDATED SUMMARY DICTIONARY ---
+            summary_list.append({
+                "broker_no": broker_no,
+                "broker_name": broker.name,
+                "op_balance": op_balance,
+                "total_sale": total_stock_debit,    # Renamed
+                "total_receipt": total_cash_debit,  # Renamed
+                "total_buy": total_stock_credit,    # Renamed
+                "total_payment": total_cash_credit, # Renamed
+                "final_balance": final_balance,
+            })
+            
+        # 5. Sort the list
+        summary_list.sort(key=lambda x: x[sort_by], reverse=(sort_dir == 'desc'))
+        
+        # 6. Calculate Totals
+        grand_total = {
+            "op_balance": sum(item['op_balance'] for item in summary_list),
+            "total_sale": sum(item['total_sale'] for item in summary_list),
+            "total_receipt": sum(item['total_receipt'] for item in summary_list),
+            "total_buy": sum(item['total_buy'] for item in summary_list),
+            "total_payment": sum(item['total_payment'] for item in summary_list),
+            "final_balance": sum(item['final_balance'] for item in summary_list),
+        }
+
+        return JsonResponse({
+            "summary_list": summary_list,
+            "grand_total": grand_total,
+            "start_date": start_date.strftime('%Y-%m-%d'),
+            "end_date": end_date.strftime('%Y-%m-%d')
+        })
+        
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)

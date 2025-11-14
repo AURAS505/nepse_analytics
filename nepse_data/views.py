@@ -3,7 +3,6 @@ from django.shortcuts import render, redirect
 from django.db import connection
 from django.db.models import Q, Max
 from listed_companies.models import Companies
-from .models import StockPrices, Indices, Marcap
 import datetime
 from django.http import HttpResponse
 from django.contrib import messages
@@ -14,9 +13,12 @@ import csv
 import pandas as pd  # <-- THIS WAS THE MISSING IMPORT
 from decimal import Decimal, InvalidOperation
 from django.core.paginator import Paginator
-from .models import StockPrices, Indices, Marcap, FloorsheetRaw
-from django.db.models import Q, Max
 from django.db.models import Q, Max, Sum
+from .models import StockPrices, Indices, Marcap, FloorsheetRaw, DividendHistory
+from django.http import JsonResponse
+from django.db.models import Value
+from django.db.models.functions import Concat
+
 
 # ==================================
 # --- CONSOLIDATED HELPER FUNCTIONS ---
@@ -63,6 +65,29 @@ def dictfetchall(cursor):
         dict(zip(columns, row))
         for row in cursor.fetchall()
     ]
+
+def clean_date(value):
+    """
+    Safely converts any input (str, datetime, etc.) to a Date object or None.
+    Handles NaT, None, empty strings, or common Excel null dates like '1900-01-00'.
+    """
+    if not value or pd.isna(value):
+        return None
+    
+    # Convert to string to handle various inputs and check for known bad dates
+    value_str = str(value).strip()
+    
+    # Pre-emptively catch empty strings or common "bad null" dates
+    if value_str in ('', '1900-01-00', 'NaT'):
+        return None
+        
+    try:
+        # pd.to_datetime is very flexible with input formats
+        return pd.to_datetime(value_str).date()
+    except (ValueError, TypeError):
+        # This will now only catch *truly* unexpected date formats
+        print(f"Could not convert '{value_str}' to Date")
+        return None
 
 
 def buyer_seller_to_int(value):
@@ -625,7 +650,112 @@ def data_entry_view(request):
 
             messages.success(request, f"Floorsheet upload for {calculation_date} successful! Inserted {inserted_count} records. Skipped {failed_rows} rows. Summary tables updated.")
             return redirect('nepse_data:data_entry')
-        
+    
+    # ... (inside data_entry_view, after the 'upload_floorsheet' block)
+
+# --- NEW DIVIDEND HISTORY UPLOAD LOGIC ---
+        elif request.POST.get('action') == 'upload_dividend':
+            dividend_file = request.FILES.get('dividend_file')
+            if not dividend_file:
+                messages.error(request, "No dividend history file selected.")
+                return redirect('nepse_data:data_entry')
+
+            # --- Read file using Pandas (handles both Excel and CSV) ---
+            try:
+                if dividend_file.name.endswith('.csv'):
+                    df = pd.read_csv(dividend_file)
+                else:
+                    df = pd.read_excel(dividend_file)
+                
+                # --- THIS IS THE CORRECTED STANDARDIZATION LOGIC ---
+                df.columns = (
+                    df.columns.str.strip()
+                    .str.lower()
+                    # 1. Handle "Bonus (%)" -> "bonus_percent"
+                    .str.replace(' (%)', '_percent', regex=False)
+                    # 2. Handle "Bonus(%)" (no space) -> "bonus_percent"
+                    .str.replace('(%', '_percent', regex=False)
+                    # 3. Handle "Bonus %" -> "bonus_percent"
+                    .str.replace(' %', '_percent', regex=False)
+                    # 4. Handle "Fiscal Year" -> "fiscal_year"
+                    .str.replace(' ', '_', regex=False)
+                    # 5. Clean up any remaining characters
+                    .str.replace('.', '', regex=False)
+                    .str.replace('/', '_', regex=False)
+                    .str.replace(')', '', regex=False)
+                )
+                # --- END OF FIX ---
+
+            except Exception as e:
+                messages.error(request, f"Error reading file: {e}")
+                return redirect('nepse_data:data_entry')
+
+            # --- Get Company Map for names ---
+            company_map = {
+                k: v for k, v in
+                Companies.objects.values_list('script_ticker', 'company_name')
+                if k
+            }
+            
+            inserted_rows, updated_rows, failed_rows = 0, 0, 0
+
+            # --- Iterate through DataFrame rows ---
+            for index, row in df.iterrows():
+                try:
+                    symbol = str(row['symbol']).strip().upper()
+                    if not symbol:
+                        failed_rows += 1
+                        continue
+
+                    fiscal_year = str(row.get('fiscal_year', '')).strip() or None
+                    
+                    # 1. Define what makes a record unique
+                    unique_key = {
+                        'symbol': symbol,
+                        'fiscal_year': fiscal_year,
+                    }
+
+                    # 2. Get all date fields
+                    announcement_date = clean_date(row.get('announcement_date'))
+                    book_closure_date = clean_date(row.get('book_closure_date'))
+                    distribution_date = clean_date(row.get('distribution_date'))
+                    bonus_listing_date = clean_date(row.get('bonus_listing_date'))
+                    
+                    # 3. Define ALL data fields to be inserted or updated
+                    data_to_insert = {
+                        'company_name': company_map.get(symbol, row.get('company_name', None)),
+                        
+                        # This will now correctly find 'bonus_percent', etc.
+                        'bonus_percent': clean_decimal(row.get('bonus_percent')),
+                        'cash_percent': clean_decimal(row.get('cash_percent')),
+                        'tax_percent': clean_decimal(row.get('tax_percent')),
+                        'total_percent': clean_decimal(row.get('total_percent')),
+                        
+                        'announcement_date': announcement_date,
+                        'book_closure_date': book_closure_date,
+                        'book_closure_status': str(row.get('book_closure_status', '')).strip() or None,
+                        'distribution_date': distribution_date,
+                        'bonus_listing_date': bonus_listing_date,
+                    }
+                    
+                    # 4. Call update_or_create
+                    obj, created = DividendHistory.objects.update_or_create(
+                        **unique_key,
+                        defaults=data_to_insert
+                    )
+
+                    if created:
+                        inserted_rows += 1
+                    else:
+                        updated_rows += 1
+
+                except Exception as e:
+                    print(f"Error processing row {index} ({symbol}): {e}")
+                    failed_rows += 1
+
+            messages.success(request, f"Dividend History upload successful! Created {inserted_rows} new records. Updated {updated_rows} records. Failed {failed_rows} rows.")
+            return redirect('nepse_data:data_entry')
+
     else:
         # --- HANDLE GET REQUEST (Unchanged) ---
         available_dates = StockPrices.objects.values('business_date').distinct().order_by('-business_date')
@@ -638,6 +768,8 @@ def data_entry_view(request):
             'available_floorsheet_dates': available_floorsheet_dates
         }
         return render(request, 'nepse_data/data_entry.html', context)
+    
+
 
 @require_POST
 def delete_floorsheet_data_view(request):
@@ -988,3 +1120,326 @@ def download_floorsheet_view(request):
         writer.writerow(row)
 
     return response
+
+
+def dividend_history_view(request):
+    title = "Dividend History"
+
+    # --- Get filter parameters ---
+    symbol = request.GET.get('symbol', '').strip().upper()
+    fiscal_year = request.GET.get('fiscal_year', '').strip()
+    
+    # --- Get pagination parameters ---
+    page = request.GET.get('page', 1)
+    per_page_str = request.GET.get('per_page', '20')
+
+    # --- Base query ---
+    base_query = DividendHistory.objects.all()
+
+    # --- 1. Apply Filters ---
+    if symbol:
+        base_query = base_query.filter(symbol=symbol)
+    if fiscal_year:
+        base_query = base_query.filter(fiscal_year=fiscal_year)
+
+    # --- 2. Apply Sorting ---
+    # The default ordering is set in the model's Meta class
+    base_query = base_query.order_by('-announcement_date', 'symbol')
+
+    # --- 3. Pagination ---
+    if per_page_str == 'All':
+        paginator = None
+        page_obj = base_query
+    else:
+        try:
+            paginator = Paginator(base_query, int(per_page_str), allow_empty_first_page=True)
+            page_obj = paginator.get_page(page)
+        except ValueError:
+            paginator = Paginator(base_query, 20, allow_empty_first_page=True)
+            page_obj = paginator.get_page(1)
+            per_page_str = '20'
+
+    # --- Get distinct values for filter dropdowns ---
+    filter_options = {
+        'symbols': list(DividendHistory.objects.values_list('symbol', flat=True)
+                        .distinct().order_by('symbol')),
+        'fiscal_years': list(DividendHistory.objects.values_list('fiscal_year', flat=True)
+                             .distinct().order_by('-fiscal_year'))
+    }
+
+    context = {
+        'title': title,
+        'dividend_data': page_obj,
+
+        # Pagination context
+        'page_obj': page_obj if paginator else None,
+        'paginator': paginator,
+        'per_page': per_page_str,
+        'page': page,
+
+        # Filter values
+        'symbol': symbol,
+        'fiscal_year': fiscal_year,
+        'filter_options': filter_options,
+    }
+    return render(request, 'nepse_data/dividend_history.html', context)
+
+
+def download_dividend_history_view(request):
+    # --- Get all the same filter parameters ---
+    symbol = request.GET.get('symbol', '').strip().upper()
+    fiscal_year = request.GET.get('fiscal_year', '').strip()
+
+    base_query = DividendHistory.objects.all()
+
+    # --- Apply Filters ---
+    if symbol:
+        base_query = base_query.filter(symbol=symbol)
+    if fiscal_year:
+        base_query = base_query.filter(fiscal_year=fiscal_year)
+
+    # --- Get data ---
+    dividend_data = base_query.order_by('-announcement_date', 'symbol').values_list(
+        'fiscal_year', 'symbol', 'company_name',
+        'bonus_percent', 'cash_percent', 'tax_percent', 'total_percent',
+        'announcement_date', 'book_closure_date', 'book_closure_status',
+        'distribution_date', 'bonus_listing_date'
+    )
+
+    if not dividend_data.exists():
+        return HttpResponse("No dividend history to download for that query.", status=404)
+
+    response = HttpResponse(content_type='text/csv')
+    download_name = f"dividend_history.csv"
+    response['Content-Disposition'] = f'attachment; filename="{download_name}"'
+
+    writer = csv.writer(response)
+    # Write header
+    writer.writerow([
+        'Fiscal Year', 'Symbol', 'Company Name',
+        'Bonus %', 'Cash %', 'Tax %', 'Total %',
+        'Announcement Date', 'Book Closure Date', 'BC Status',
+        'Distribution Date', 'Bonus Listing Date'
+    ])
+
+    # Write data rows
+    for row in dividend_data:
+        writer.writerow(row)
+
+    return response
+
+
+def download_dividend_sample_view(request):
+    """
+    Generates and serves a sample CSV file for dividend history uploads.
+    """
+    response = HttpResponse(content_type='text/csv')
+    response['Content-Disposition'] = 'attachment; filename="sample_dividend_history.csv"'
+
+    writer = csv.writer(response)
+    
+    # Write Header
+    writer.writerow([
+        'Fiscal Year', 'Symbol', 'Bonus (%)', 'Cash (%)', 'Tax (%)', 
+        'Total (%)', 'Announcement Date', 'Book Closure Date', 
+        'Book Closure Status', 'Distribution Date', 'Bonus Listing Date'
+    ])
+    
+    # Write Sample Rows
+    writer.writerow([
+        '2079/80', 'NIFRA', '5', '0', '0', '5', '2024-09-15', '2024-10-01', 'Posted', '2024-11-10', '2024-12-05'
+    ])
+    writer.writerow([
+        '2079/80', 'NABIL', '11', '22.5', '1.18', '33.5', '2024-08-20', '2024-09-05', 'Posted', '2024-10-15', '2024-11-20'
+    ])
+    writer.writerow([
+        '2078/79', 'HDL', '20', '5', '1.32', '25', '2023-11-01', '2023-11-20', 'Posted', '', ''
+    ])
+    writer.writerow([
+        '2078/79', 'CIT', '10', '1.5', '0', '11.5', '2023-10-05', '', 'Not Posted', '', ''
+    ])
+
+    return response
+
+
+@require_POST
+def edit_dividend_view(request, pk):
+    """
+    Handles editing a single dividend history entry via a modal form.
+    """
+    try:
+        dividend = DividendHistory.objects.get(pk=pk)
+    except DividendHistory.DoesNotExist:
+        messages.error(request, "Dividend entry not found.")
+        return redirect('nepse_data:dividend_history')
+
+    # Get data from the POST request
+    dividend.fiscal_year = request.POST.get('fiscal_year')
+    dividend.symbol = request.POST.get('symbol', '').upper()
+    dividend.company_name = request.POST.get('company_name')
+    
+    dividend.bonus_percent = clean_decimal(request.POST.get('bonus_percent'))
+    dividend.cash_percent = clean_decimal(request.POST.get('cash_percent'))
+    dividend.tax_percent = clean_decimal(request.POST.get('tax_percent'))
+    dividend.total_percent = clean_decimal(request.POST.get('total_percent'))
+    
+    # Use clean_date for all date fields
+    announcement_date = clean_date(request.POST.get('announcement_date'))
+    book_closure_date = clean_date(request.POST.get('book_closure_date'))
+    distribution_date = clean_date(request.POST.get('distribution_date'))
+    bonus_listing_date = clean_date(request.POST.get('bonus_listing_date'))
+
+    dividend.announcement_date = announcement_date if announcement_date else None
+    dividend.book_closure_date = book_closure_date if book_closure_date else None
+    dividend.distribution_date = distribution_date if distribution_date else None
+    dividend.bonus_listing_date = bonus_listing_date if bonus_listing_date else None
+    
+    dividend.book_closure_status = request.POST.get('book_closure_status')
+
+    try:
+        dividend.save()
+        messages.success(request, f"Successfully updated dividend for {dividend.symbol} ({dividend.fiscal_year}).")
+    except Exception as e:
+        messages.error(request, f"Error updating dividend: {e}")
+
+    # Redirect back to the same page (including filters)
+    return redirect(request.META.get('HTTP_REFERER', 'nepse_data:dividend_history'))
+
+
+@require_POST
+def delete_dividend_view(request, pk):
+    """
+    Handles deleting a single dividend history entry.
+    """
+    try:
+        dividend = DividendHistory.objects.get(pk=pk)
+        symbol = dividend.symbol
+        fy = dividend.fiscal_year
+        dividend.delete()
+        messages.success(request, f"Successfully deleted dividend for {symbol} ({fy}).")
+    except DividendHistory.DoesNotExist:
+        messages.error(request, "Dividend entry not found.")
+    except Exception as e:
+        messages.error(request, f"Error deleting dividend: {e}")
+        
+    return redirect(request.META.get('HTTP_REFERER', 'nepse_data:dividend_history'))
+
+
+@require_POST
+def delete_all_dividends_view(request):
+    """
+    Handles deleting ALL dividend history entries.
+    """
+    try:
+        count, _ = DividendHistory.objects.all().delete()
+        messages.success(request, f"Successfully deleted all {count} dividend history records.")
+    except Exception as e:
+        messages.error(request, f"An error occurred while deleting all records: {e}")
+        
+    return redirect('nepse_data:data_entry')
+
+
+@require_POST
+def add_dividend_view(request):
+    """
+    Handles adding OR UPDATING a new single dividend entry via a modal form.
+    This now uses update_or_create to match the bulk upload logic.
+    """
+    try:
+        # Get the unique keys
+        symbol = request.POST.get('symbol', '').upper()
+        fiscal_year = request.POST.get('fiscal_year')
+
+        if not symbol or not fiscal_year:
+            messages.error(request, "Symbol and Fiscal Year are required.")
+            return redirect('nepse_data:data_entry')
+
+        # Get all the data for the 'defaults' dictionary
+        data_to_insert = {
+            'company_name': request.POST.get('company_name'),
+            'bonus_percent': clean_decimal(request.POST.get('bonus_percent')),
+            'cash_percent': clean_decimal(request.POST.get('cash_percent')),
+            'tax_percent': clean_decimal(request.POST.get('tax_percent')),
+            'total_percent': clean_decimal(request.POST.get('total_percent')),
+            
+            'announcement_date': clean_date(request.POST.get('announcement_date')),
+            'book_closure_date': clean_date(request.POST.get('book_closure_date')),
+            'distribution_date': clean_date(request.POST.get('distribution_date')),
+            'bonus_listing_date': clean_date(request.POST.get('bonus_listing_date')),
+            'book_closure_status': request.POST.get('book_closure_status'),
+        }
+
+        # Use update_or_create to find a match on (symbol, fiscal_year)
+        # or create a new one.
+        obj, created = DividendHistory.objects.update_or_create(
+            symbol=symbol,
+            fiscal_year=fiscal_year,
+            defaults=data_to_insert
+        )
+
+        if created:
+            messages.success(request, f"Successfully added new dividend for {symbol} ({fiscal_year}).")
+        else:
+            messages.success(request, f"Successfully updated dividend for {symbol} ({fiscal_year}).")
+    
+    except Exception as e:
+        messages.error(request, f"Error adding/updating dividend: {e}")
+
+    # Redirect back to the data entry page
+    return redirect('nepse_data:data_entry')
+
+def search_dividends_json_view(request):
+    """
+    Returns a JSON list of dividend entries matching a search term.
+    """
+    term = request.GET.get('term', '').strip()
+    if not term:
+        return JsonResponse({'error': 'No search term provided'}, status=400)
+
+    # Search by symbol or fiscal year
+    # We use Concat to make searching "NIFRA 2079/80" possible
+    search_results = DividendHistory.objects.annotate(
+        search_field=Concat('symbol', Value(' '), 'fiscal_year')
+    ).filter(
+        Q(search_field__icontains=term) | Q(symbol__icontains=term)
+    ).order_by('-fiscal_year', 'symbol')[:50] # Limit to 50 results
+
+    # Serialize all data needed by the edit modal
+    data = [
+        {
+            'id': item.id,
+            'symbol': item.symbol,
+            'fiscal_year': item.fiscal_year,
+            'company_name': item.company_name,
+            'bonus_percent': item.bonus_percent,
+            'cash_percent': item.cash_percent,
+            'tax_percent': item.tax_percent,
+            'total_percent': item.total_percent,
+            'announcement_date': item.announcement_date.strftime('%Y-%m-%d') if item.announcement_date else '',
+            'book_closure_date': item.book_closure_date.strftime('%Y-%m-%d') if item.book_closure_date else '',
+            'book_closure_status': item.book_closure_status,
+            'distribution_date': item.distribution_date.strftime('%Y-%m-%d') if item.distribution_date else '',
+            'bonus_listing_date': item.bonus_listing_date.strftime('%Y-%m-%d') if item.bonus_listing_date else '',
+        } 
+        for item in search_results
+    ]
+    
+    return JsonResponse({'results': data})
+
+def company_lookup_json_view(request):
+    """
+    Looks up a company name by its symbol (script_ticker).
+    """
+    symbol = request.GET.get('symbol', '').strip().upper()
+    if not symbol:
+        return JsonResponse({'error': 'No symbol provided'}, status=400)
+
+    try:
+        # We query the Companies model from your other app
+        company = Companies.objects.get(script_ticker=symbol)
+        return JsonResponse({'company_name': company.company_name})
+    except Companies.DoesNotExist:
+        # If not found, return an empty string
+        return JsonResponse({'company_name': ''})
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
