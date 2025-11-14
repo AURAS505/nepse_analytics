@@ -23,6 +23,19 @@ import json
 import openpyxl
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
+from django.contrib import messages
+from .models import Transaction, BrokerTransaction
+from nepse_data.models import Brokers
+from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
+
+
+from django.db import connection, transaction as db_transaction # db_transaction is needed for @db_transaction.atomic
+from django.http import JsonResponse, HttpResponse, Http404 # HttpResponse is needed for download
+import csv
+from io import TextIOWrapper, BytesIO # needed for file handling
+from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
+from datetime import datetime, date # needed for datetime.strptime
+from nepse_data.models import Brokers # Brokers model is crucial
 
 # --- Helper Functions ---
 
@@ -860,3 +873,440 @@ def download_valuation_report(request):
     response['Content-Disposition'] = f'attachment; filename=Valuation_Report_{end_date}.xlsx'
     wb.save(response)
     return response
+
+
+
+
+# --- ADD THESE NEW VIEWS FOR BROKER TRANSACTIONS ---
+
+@login_required
+def broker_transaction_list_and_add(request):
+    """
+    Handles listing all broker transactions (with filtering and pagination)
+    and adding a new one.
+    """
+    if request.method == 'POST':
+        try:
+            broker_no = request.POST.get('broker')
+            date = request.POST.get('date')
+            action = request.POST.get('action')
+            amount_str = request.POST.get('amount')
+            remarks = request.POST.get('remarks', '')
+
+            # Validation
+            if not broker_no or not date or not action or not amount_str:
+                messages.error(request, "Error: Missing required fields (Broker, Date, Action, Amount).")
+                return redirect('my_portfolio:broker_transactions')
+            
+            try:
+                broker = Brokers.objects.get(broker_no=broker_no)
+            except Brokers.DoesNotExist:
+                messages.error(request, f"Error: Broker {broker_no} not found.")
+                return redirect('my_portfolio:broker_transactions')
+            
+            try:
+                amount = Decimal(amount_str)
+                # Removed the 'if amount <= 0' check to allow negative amounts
+            except InvalidOperation:
+                messages.error(request, "Error: Invalid Amount format.")
+                return redirect('my_portfolio:broker_transactions')
+
+            # Create and save the new transaction
+            new_txn = BrokerTransaction(
+                broker=broker,
+                date=date,
+                action=action,
+                amount=amount,
+                remarks=remarks
+            )
+            new_txn.save() 
+            messages.success(request, "Broker transaction added successfully!")
+            
+        except Exception as e:
+            messages.error(request, f"An unexpected server error occurred: {str(e)}")
+        
+        return redirect('my_portfolio:broker_transactions')
+
+    # ... (rest of the GET logic remains unchanged) ...
+    # --- GET Request Logic (Listing, Filtering, Pagination) ---
+    
+    # 1. Start with the base queryset
+    transactions_list = BrokerTransaction.objects.all().select_related('broker')
+
+    # 2. Get filter parameters from the URL (request.GET)
+    filter_broker = request.GET.get('filter_broker', '')
+    filter_action = request.GET.get('filter_action', '')
+    
+    # 3. Apply filters to the queryset
+    if filter_broker:
+        transactions_list = transactions_list.filter(broker__broker_no=filter_broker)
+    if filter_action:
+        transactions_list = transactions_list.filter(action=filter_action)
+
+    # 4. Get pagination parameters
+    rows_per_page = request.GET.get('rows', '20') # Default 20
+    
+    # 5. Apply pagination
+    if rows_per_page == 'all':
+        page_obj = transactions_list # No pagination
+        is_paginated = False
+    else:
+        try:
+            rows_int = int(rows_per_page)
+        except ValueError:
+            rows_int = 20 # Fallback to default
+        
+        paginator = Paginator(transactions_list, rows_int)
+        page_num = request.GET.get('page', 1)
+        is_paginated = True
+        
+        try:
+            page_obj = paginator.page(page_num)
+        except PageNotAnInteger:
+            # If page is not an integer, deliver first page.
+            page_obj = paginator.page(1)
+        except EmptyPage:
+            # If page is out of range, deliver last page of results.
+            page_obj = paginator.page(paginator.num_pages)
+
+    # 6. Prepare context for the template
+    brokers = Brokers.objects.all().order_by('broker_no')
+    action_choices = BrokerTransaction.ActionType.choices
+
+    # This is to repopulate the filter form with current values
+    current_filters = {
+        'broker': filter_broker,
+        'action': filter_action,
+        'rows': rows_per_page
+    }
+    
+    # This is to preserve filters when changing pages (for pagination links)
+    filter_params = f"&filter_broker={filter_broker}&filter_action={filter_action}&rows={rows_per_page}"
+
+    context = {
+        'page_obj': page_obj,         # Use this in the loop instead of 'transactions'
+        'is_paginated': is_paginated,
+        'brokers': brokers,           # For the add form AND filter form
+        'action_choices': action_choices, # For the add form AND filter form
+        'current_filters': current_filters,
+        'filter_params': filter_params,  # For pagination links
+        'rows_options': ['20', '50', '100', 'all'],
+    }
+    return render(request, 'my_portfolio/broker_transactions.html', context)
+
+
+@login_required
+def broker_transaction_edit(request, unique_id):
+    """
+    Handles editing an existing broker transaction.
+    """
+    txn = get_object_or_404(BrokerTransaction, unique_id=unique_id)
+    
+    if request.method == 'POST':
+        try:
+            broker_no = request.POST.get('broker')
+            date = request.POST.get('date')
+            action = request.POST.get('action')
+            amount_str = request.POST.get('amount')
+            remarks = request.POST.get('remarks', '')
+
+            broker = Brokers.objects.get(broker_no=broker_no)
+            amount = Decimal(amount_str)
+            
+            # Update fields
+            txn.broker = broker
+            txn.date = date
+            txn.action = action
+            txn.amount = amount
+            txn.remarks = remarks
+            txn.save()
+            
+            messages.success(request, "Transaction updated successfully.")
+            return redirect('my_portfolio:broker_transactions')
+            
+        except Exception as e:
+            messages.error(request, f"Error updating transaction: {e}")
+            return redirect('my_portfolio:broker_transaction_edit', unique_id=unique_id)
+
+    # GET Request:
+    brokers = Brokers.objects.all().order_by('broker_no')
+    context = {
+        'transaction': txn,
+        'brokers': brokers,
+        'action_choices': BrokerTransaction.ActionType.choices
+    }
+    return render(request, 'my_portfolio/edit_broker_transaction.html', context)
+
+
+@login_required
+@require_POST
+def broker_transaction_delete(request, unique_id):
+    """
+    Handles deleting a broker transaction.
+    """
+    txn = get_object_or_404(BrokerTransaction, unique_id=unique_id)
+    try:
+        txn.delete()
+        messages.success(request, "Transaction deleted.")
+    except Exception as e:
+        messages.error(request, f"Error deleting transaction: {e}")
+    return redirect('my_portfolio:broker_transactions')
+
+
+# --- ADD OR REPLACE THESE FUNCTIONS AT THE END OF my_portfolio/views.py ---
+
+@login_required
+@require_POST
+@db_transaction.atomic
+def broker_transaction_upload(request):
+    file = request.FILES.get('file')
+    if not file or not file.name.endswith('.csv'):
+        messages.error(request, "Please upload a valid CSV file.")
+        return redirect('my_portfolio:broker_transactions')
+
+    success_count = 0
+    error_count = 0
+    errors = []
+    
+    valid_broker_nos = set(Brokers.objects.values_list('broker_no', flat=True))
+    valid_actions = set(BrokerTransaction.ActionType.values)
+
+    try:
+        csv_file = TextIOWrapper(file, encoding='utf-8', errors='replace')
+        reader = csv.DictReader(csv_file)
+        reader.fieldnames = [header.strip() for header in reader.fieldnames]
+        
+        required_headers = ['Date', 'Broker', 'Action', 'Amount']
+        if not all(header in reader.fieldnames for header in required_headers):
+            missing = [h for h in required_headers if h not in reader.fieldnames]
+            messages.error(request, f"File missing required columns: {', '.join(missing)}")
+            return redirect('my_portfolio:broker_transactions')
+
+        for index, row in enumerate(reader, start=2):
+            try:
+                date_str = str(row.get('Date', '')).split()[0].strip()
+                date = datetime.strptime(date_str, '%Y-%m-%d').date()
+                
+                broker_no_str = str(row.get('Broker', '')).strip()
+                if not broker_no_str.isdigit():
+                    raise ValueError(f"Broker '{broker_no_str}' must be a number.")
+                broker_no = int(broker_no_str)
+                if broker_no not in valid_broker_nos:
+                    raise ValueError(f"Broker {broker_no} not found in database.")
+                
+                broker = Brokers.objects.get(broker_no=broker_no)
+                
+                action = str(row.get('Action', '')).strip()
+                if action not in valid_actions:
+                    raise ValueError(f"Invalid Action '{action}'. Must be one of: {', '.join(valid_actions)}")
+
+                amount_str = str(row.get('Amount', '')).strip()
+                if not amount_str:
+                    raise ValueError("Amount cannot be empty.")
+                amount = Decimal(amount_str)
+                # Allowing negative amounts for cash ledger entries.
+
+                remarks = str(row.get('Remarks', '')).strip() or None
+
+                BrokerTransaction(
+                    broker=broker,
+                    date=date,
+                    action=action,
+                    amount=amount,
+                    remarks=remarks
+                ).save()
+                success_count += 1
+
+            except Exception as e:
+                errors.append(f"Row {index}: {str(e)}")
+                error_count += 1
+                continue
+
+        if error_count > 0:
+            db_transaction.set_rollback(True)
+            messages.error(request, f"Upload failed. {error_count} errors found. First error: {errors[0]}")
+        else:
+            messages.success(request, f"Upload successful! {success_count} broker transactions added.")
+
+    except Exception as e:
+        messages.error(request, f"An unexpected error occurred: {e}")
+
+    return redirect('my_portfolio:broker_transactions')
+
+
+@login_required
+def download_broker_template(request):
+    """
+    Provides a CSV template for broker R/P transactions.
+    """
+    fieldnames = ['Date', 'Broker', 'Action', 'Amount', 'Remarks']
+    sample_data = [
+        {'Date': '2025-11-14', 'Broker': '58', 'Action': 'Payment', 'Amount': '150000', 'Remarks': 'Fund transfer for buy'},
+        {'Date': '2025-11-15', 'Broker': '45', 'Action': 'Receipt', 'Amount': '25000', 'Remarks': 'Sale proceeds'},
+    ]
+
+    output = TextIOWrapper(BytesIO(), encoding='utf-8', newline='')
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+    writer.writerows(sample_data)
+    output.flush()
+
+    response = HttpResponse(output.buffer.getvalue(), content_type='text/csv')
+    response['Content-Disposition'] = 'attachment; filename="broker_transaction_template.csv"'
+    return response
+
+def get_broker_rp_entries(broker_no):
+    """Fetches and normalizes R/P entries for the ledger."""
+    rp_entries = []
+    
+    # Define the sign convention for the cash ledger (positive = Debit/Inflow, negative = Credit/Outflow)
+    # The convention can depend on your accounting standard, but we'll use a standard ledger view:
+    # Debits (Broker pays you/Your balance increases): Receipt, Misc(+)
+    # Credits (You pay broker/Your balance decreases): Payment, Chq Issue, Pledge Charge, Misc(-)
+    
+    debit_actions = {'Balance b/d', 'Receipt', 'Misc(+)'}
+    credit_actions = {'Payment', 'Chq Issue', 'Pledge Charge', 'Misc(-)'}
+
+    # Fetch all BrokerTransactions for the broker
+    txns = BrokerTransaction.objects.filter(
+        broker__broker_no=broker_no
+    ).select_related('broker').order_by('date', 'created_at')
+
+    for txn in txns:
+        amount = txn.amount
+        is_debit = False
+        
+        if txn.action in debit_actions:
+            # Positive amounts for Debit actions remain Debit
+            is_debit = True
+        elif txn.action in credit_actions:
+            # Positive amounts for Credit actions are registered as Credit
+            is_debit = False
+            
+        # Handle the special case of Balance b/d, where the sign is already set by the user
+        if txn.action == 'Balance b/d':
+            is_debit = (amount >= 0)
+        
+        rp_entries.append({
+            'date': txn.date,
+            'description': f"{txn.get_action_display()} - {txn.remarks or ''}",
+            'source': 'CASH',
+            'amount': amount,
+            'debit': amount if is_debit else Decimal('0.00'),
+            'credit': abs(amount) if not is_debit else Decimal('0.00')
+        })
+        
+    return rp_entries
+
+def _get_broker_ledger_data(broker_no):
+    """
+    Helper function to fetch, merge, and process all transactions
+    for a single broker and return a ledger.
+    """
+    
+    # 1. Get all Cash R/P entries
+    cash_txns = BrokerTransaction.objects.filter(
+        broker__broker_no=broker_no
+    ).order_by('date', 'created_at')
+
+    # 2. Get all Stock S/P entries
+    stock_txns = Transaction.objects.filter(
+        broker=str(broker_no) 
+    ).select_related('symbol').order_by('date', 'created_at')
+
+    # 3. Normalize and merge
+    all_entries = []
+    
+    # Add Cash Entries
+    for txn in cash_txns:
+        amount = txn.amount
+        is_debit = False
+        if txn.action in ['Receipt', 'Misc(+)']:
+            is_debit = True
+        elif txn.action == 'Balance b/d':
+            is_debit = (amount >= 0)
+        
+        all_entries.append({
+            'date': txn.date,
+            'description': f"{txn.get_action_display()} - {txn.remarks or ''}",
+            'source': 'CASH',
+            'debit': amount if is_debit else Decimal('0.00'),
+            'credit': abs(amount) if not is_debit else Decimal('0.00')
+        })
+
+    # Add Stock Entries
+    for txn in stock_txns:
+        amount = txn.billed_amount or Decimal('0.0')
+        if txn.transaction_type in ['SALE', 'CONVERSION(-)', 'SUSPENSE(-)']:
+            # Sale = Cash In = DEBIT
+            all_entries.append({
+                'date': txn.date,
+                'description': f"Stock {txn.transaction_type} of {txn.symbol.script_ticker} ({txn.kitta} kitta)",
+                'source': 'STOCK',
+                'debit': amount,
+                'credit': Decimal('0.00')
+            })
+        elif txn.transaction_type in ['BUY', 'IPO', 'RIGHT', 'CONVERSION(+)', 'SUSPENSE(+)']:
+            # Buy = Cash Out = CREDIT
+            all_entries.append({
+                'date': txn.date,
+                'description': f"Stock {txn.transaction_type} of {txn.symbol.script_ticker} ({txn.kitta} kitta)",
+                'source': 'STOCK',
+                'debit': Decimal('0.00'),
+                'credit': amount
+            })
+            
+    # 4. Sort all entries
+    all_entries.sort(key=lambda x: x['date'])
+
+    # 5. Calculate running balance and totals
+    running_balance = Decimal('0.00')
+    total_debit = Decimal('0.00')
+    total_credit = Decimal('0.00')
+    ledger = []
+
+    for entry in all_entries:
+        running_balance += entry['debit'] - entry['credit']
+        total_debit += entry['debit']
+        total_credit += entry['credit']
+        
+        entry['running_balance'] = running_balance
+        ledger.append(entry)
+
+    # 6. Return all processed data
+    return {
+        'ledger': ledger,
+        'total_debit': total_debit,
+        'total_credit': total_credit,
+        'final_balance': running_balance
+    }
+
+@login_required
+def broker_ledger_report(request):
+    # 1. Get all brokers for the filter dropdown
+    all_brokers = Brokers.objects.all().order_by('broker_no')
+    
+    # 2. Get the selected broker from the URL (e.g., ?broker=45)
+    selected_broker_no = request.GET.get('broker', '')
+    
+    ledger_data = None
+    broker = None
+
+    # 3. If a broker was selected, get their data
+    if selected_broker_no:
+        try:
+            broker = get_object_or_404(Brokers, broker_no=selected_broker_no)
+            # 4. Call the helper function to get the ledger
+            ledger_data = _get_broker_ledger_data(selected_broker_no)
+        except:
+            messages.error(request, f"Broker {selected_broker_no} not found.")
+            
+    # 5. Pass everything to the template
+    context = {
+        'all_brokers': all_brokers,
+        'selected_broker_no': selected_broker_no,
+        'broker': broker,
+        'ledger_data': ledger_data  # This will contain the ledger, totals, etc.
+    }
+    
+    return render(request, 'my_portfolio/broker_ledger_report.html', context)

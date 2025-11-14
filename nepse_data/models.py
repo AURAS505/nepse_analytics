@@ -114,3 +114,29 @@ class FloorsheetRaw(models.Model):
 
     def __str__(self):
         return f"{self.stock_symbol} ({self.contract_no})"
+    
+
+
+class Brokers(models.Model):
+    # As you described: sn, broker_no, name, etc.
+    sn = models.AutoField(primary_key=True)
+    
+    # --- THIS IS THE FIX ---
+    # Changed from PositiveIntegerField to IntegerField to match your database
+    broker_no = models.IntegerField(unique=True)
+    # --- END OF FIX ---
+    
+    name = models.CharField(max_length=255)
+    contact_person = models.CharField(max_length=255, null=True, blank=True)
+    contact_number = models.CharField(max_length=50, null=True, blank=True)
+    status = models.CharField(max_length=50, null=True, blank=True)
+    tms_link = models.URLField(max_length=255, null=True, blank=True)
+
+    class Meta:
+        verbose_name = 'Broker'
+        verbose_name_plural = 'Brokers'
+        # This matches your "SELECT * FROM nepse_data.brokers;"
+        db_table = 'brokers' 
+
+    def __str__(self):
+        return f"{self.broker_no} - {self.name}"

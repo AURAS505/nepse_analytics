@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}Broker Ledger Report{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row mb-3">
+        <div class="col-12 d-flex justify-content-between align-items-center">
+            <h3>Broker Ledger Report</h3>
+            <a href="{% url 'my_portfolio:portfolio_home' %}" class="btn btn-sm btn-outline-secondary">
+                <i class="bi bi-arrow-left me-1"></i>
+                Back to Dashboard
+            </a>
+        </div>
+    </div>
+    
+    <div class="card shadow-sm mb-4">
+        <div class="card-header">
+            <h5 class="mb-0"><i class="bi bi-funnel-fill me-2"></i> Select Broker</h5>
+        </div>
+        <div class="card-body">
+            <form action="{% url 'my_portfolio:broker_ledger_report' %}" method="GET" class="row g-3 align-items-end">
+                <div class="col-md-9">
+                    <label for="broker" class="form-label">Broker</label>
+                    <select class="form-select" id="broker" name="broker" required>
+                        <option value="">-- Select a Broker to View Ledger --</option>
+                        {% for b in all_brokers %}
+                            <option value="{{ b.broker_no }}" 
+                                {% if b.broker_no|stringformat:"s" == selected_broker_no %}selected{% endif %}>
+                                {{ b.broker_no }} - {{ b.name }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-3 d-grid">
+                    <button type="submit" class="btn btn-primary btn-lg">
+                        <i class="bi bi-search me-2"></i> View Ledger
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    {% if ledger_data %}
+    <div id="ledger-results">
+        <h4 class="mb-3">Ledger for: {{ broker.broker_no }} - {{ broker.name }}</h4>
+
+        <div class="row row-cols-1 row-cols-md-3 g-4 mb-4">
+            <div class="col">
+                <div class="card shadow-sm text-center h-100">
+                    <div class="card-header">Total Debit (Inflow)</div>
+                    <div class="card-body">
+                        <h4 class="card-title text-success">Rs. {{ ledger_data.total_debit|floatformat:2|intcomma }}</h4>
+                    </div>
+                </div>
+            </div>
+            <div class="col">
+                <div class="card shadow-sm text-center h-100">
+                    <div class="card-header">Total Credit (Outflow)</div>
+                    <div class="card-body">
+                        <h4 class="card-title text-danger">Rs. {{ ledger_data.total_credit|floatformat:2|intcomma }}</h4>
+                    </div>
+                </div>
+            </div>
+            <div class="col">
+                <div class="card shadow-sm text-center h-100">
+                    <div class="card-header">Current Final Balance</div>
+                    <div class="card-body">
+                        <h4 class="card-title fw-bold {% if ledger_data.final_balance < 0 %}text-danger{% else %}text-primary{% endif %}">
+                            Rs. {{ ledger_data.final_balance|floatformat:2|intcomma }}
+                        </h4>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card shadow-sm">
+            <div class="card-header">
+                <h5 class="mb-0">Transaction History</h5>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-striped table-hover small mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Date</th>
+                            <th>Source</th>
+                            <th>Description</th>
+                            <th class="text-end text-success">Debit (DR)</th>
+                            <th class="text-end text-danger">Credit (CR)</th>
+                            <th class="text-end">Balance</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for entry in ledger_data.ledger %}
+                        <tr>
+                            <td>{{ entry.date|date:"Y-m-d" }}</td>
+                            <td>
+                                <span class="badge bg-{% if entry.source == 'CASH' %}info{% else %}primary{% endif %}">{{ entry.source }}</span>
+                            </td>
+                            <td>{{ entry.description }}</td>
+                            <td class="text-end text-success">{{ entry.debit|floatformat:2|intcomma }}</td>
+                            <td class="text-end text-danger">{{ entry.credit|floatformat:2|intcomma }}</td>
+                            <td class="text-end fw-bold {% if entry.running_balance < 0 %}text-danger{% else %}text-primary{% endif %}">
+                                {{ entry.running_balance|floatformat:2|intcomma }}
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="6" class="text-center text-muted py-4">
+                                No transactions found for this broker.
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    {% else %}
+        <div class="text-center text-muted p-5">
+            <i class="bi bi-info-circle" style="font-size: 3rem;"></i>
+            <p class="mt-2">Please select a broker from the dropdown to view their ledger.</p>
+        </div>
+    {% endif %}
+
+</div>
+{% endblock %}

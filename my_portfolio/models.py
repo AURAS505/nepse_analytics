@@ -3,6 +3,7 @@ from django.db import models
 from django.utils import timezone
 from decimal import Decimal, ROUND_HALF_UP
 import uuid
+from nepse_data.models import Brokers
 
 # Import the models from your other apps
 # We link to 'Companies' from listed_companies
@@ -99,3 +100,73 @@ class Transaction(models.Model):
             self.rate = None
             
         super().save(*args, **kwargs)
+
+
+class BrokerTransaction(models.Model):
+    class ActionType(models.TextChoices):
+        BALANCE_BD = 'Balance b/d', 'Balance b/d'
+        PAYMENT = 'Payment', 'Payment'
+        RECEIPT = 'Receipt', 'Receipt'
+        CHQ_ISSUE = 'Chq Issue', 'Chq Issue'
+        PLEDGE_CHARGE = 'Pledge Charge', 'Pledge Charge'
+        BUY_CO = 'Buy C/O', 'Buy C/O'
+        SALE_CO = 'Sale C/O', 'Sale C/O'
+        MISC_PLUS = 'Misc(+)', 'Misc(+)'
+        MISC_MINUS = 'Misc(-)', 'Misc(-)'
+
+    unique_id = models.CharField(
+        max_length=50, 
+        primary_key=True, 
+        default=generate_unique_id, 
+        editable=False
+    )
+    
+    # Links to the 'Brokers' model in 'nepse_data' app
+    broker = models.ForeignKey(
+        Brokers, 
+        on_delete=models.PROTECT, 
+        to_field='broker_no',
+        db_column='broker_no',
+        verbose_name='Broker'
+    )
+    
+    date = models.DateField()
+    
+    action = models.CharField(
+        max_length=20, 
+        choices=ActionType.choices,
+        verbose_name='Action'
+    )
+    
+    amount = models.DecimalField(
+        max_digits=15, 
+        decimal_places=2,
+        verbose_name='Amount'
+    )
+    
+    remarks = models.CharField(
+        max_length=255, 
+        null=True, 
+        blank=True,
+        verbose_name='Remarks'
+    )
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-date', '-created_at']
+        verbose_name = 'Broker Transaction'
+        verbose_name_plural = 'Broker Transactions'
+
+    def __str__(self):
+        return f"{self.date} | {self.broker.broker_no} | {self.action} | {self.amount}"
+
+    def save(self, *args, **kwargs):
+        # We can override generate_unique_id to include the date
+        if not self.unique_id or self.unique_id.startswith('YYYY'):
+             date_prefix = self.date.strftime('%Y%m%d')
+             random_part = str(uuid.uuid4())[:6].upper()
+             self.unique_id = f"{date_prefix}-{random_part}"
+        super().save(*args, **kwargs)
+
+

@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}Edit R/P Transaction{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="row justify-content-center">
+        <div class="col-lg-8">
+            
+            <div class="mb-3">
+                <a href="{% url 'my_portfolio:broker_transactions' %}" class="btn btn-sm btn-outline-secondary">
+                    <i class="bi bi-arrow-left me-1"></i>
+                    Back to R/P List
+                </a>
+            </div>
+
+            <div class="card shadow-sm">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0"><i class="bi bi-pencil-fill me-2"></i> Edit R/P Transaction</h5>
+                </div>
+                <div class="card-body p-4">
+                    <form action="{% url 'my_portfolio:broker_transaction_edit' transaction.unique_id %}" method="POST">
+                        {% csrf_token %}
+                        
+                        <div class="mb-3">
+                            <label class="form-label">Unique ID</label>
+                            <input type="text" class="form-control" value="{{ transaction.unique_id }}" disabled>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="broker" class="form-label">Broker</label>
+                            <select class="form-select" id="broker" name="broker" required>
+                                <option value="">Select Broker</option>
+                                {% for broker in brokers %}
+                                    <option value="{{ broker.broker_no }}" 
+                                        {% if broker.broker_no == transaction.broker.broker_no %}selected{% endif %}>
+                                        {{ broker.broker_no }} - {{ broker.name }}
+                                    </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="date" class="form-label">Date</label>
+                            <input type="text" class="form-control" id="date" name="date" required 
+                                   value="{{ transaction.date|date:'Y-m-d' }}">
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="action" class="form-label">Action</label>
+                            <select class="form-select" id="action" name="action" required>
+                                <option value="">Select Action</option>
+                                {% for value, display in action_choices %}
+                                    <option value="{{ value }}" 
+                                        {% if value == transaction.action %}selected{% endif %}>
+                                        {{ display }}
+                                    </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="amount" class="form-label">Amount</label>
+                            <input type="number" class="form-control" id="amount" name="amount" step="0.01" 
+                                   value="{{ transaction.amount|stringformat:'f' }}" required>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="remarks" class="form-label">Remarks</label>
+                            <input type="text" class="form-control" id="remarks" name="remarks" 
+                                   value="{{ transaction.remarks|default:'' }}">
+                        </div>
+                        
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-primary btn-lg">
+                                <i class="bi bi-check-circle me-2"></i> Save Changes
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Initialize Flatpickr date picker
+    flatpickr("#date", {
+        dateFormat: "Y-m-d"
+    });
+</script>
+{% endblock %}
