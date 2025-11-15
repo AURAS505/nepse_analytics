@@ -30,10 +30,17 @@ import re # For parsing the fiscal year string
 # --- END OF ADDED IMPORTS ---
 
 
+# --- *** NEW IMPORT *** ---
+# This is the model we will be WRITING to
+from adjustments_stock_price.models import PriceAdjustments
+# --- *** END OF NEW IMPORT *** ---
+
+
 # ==================================
 # --- CONSOLIDATED HELPER FUNCTIONS ---
 # ==================================
 
+# ... (all your existing helper functions like clean_decimal, clean_int, etc. remain unchanged) ...
 def clean_decimal(value):
     """
     Safely converts any input (str, float, int) with commas 
@@ -110,10 +117,12 @@ def buyer_seller_to_int(value):
         return int(value)
     except (ValueError, TypeError):
         return None
+
 # ==================================
 # --- ALL YOUR VIEWS (Corrected) ---
 # ==================================
 
+# ... (all your existing views like todays_price_view, data_entry_view, etc. remain unchanged) ...
 def todays_price_view(request):
     # (This view is unchanged)
     view = request.GET.get('view', 'date')
@@ -740,7 +749,7 @@ def data_entry_view(request):
                     unique_key = {
                         'symbol': symbol,
                         'fiscal_year': fiscal_year,
-                        'book_closure_date': book_closure_date 
+                        'book_closure_date': book_closure_date # <-- Corrected typo here
                     }
                     
                     data_to_insert = {
@@ -805,6 +814,8 @@ def data_entry_view(request):
         }
         return render(request, 'nepse_data/data_entry.html', context)
     
+
+# ... (all your other existing views like delete_floorsheet_data_view, indices_view, etc. remain unchanged) ...
 
 
 @require_POST
@@ -1123,7 +1134,7 @@ def dividend_history_view(request):
         base_query = base_query.filter(symbol=symbol)
     if fiscal_year:
         base_query = base_query.filter(fiscal_year=fiscal_year)
-    base_query = base_query.order_by(F('book_closure_date').desc(nulls_last=True), '-fiscal_year')
+    base_query = base_query.order_by(F('book_closure_date').desc(nulls_last=True), '-fiscal_year') # <-- Corrected
     if per_page_str == 'All':
         paginator = None
         page_obj = base_query
@@ -1165,7 +1176,7 @@ def download_dividend_history_view(request):
     if fiscal_year:
         base_query = base_query.filter(fiscal_year=fiscal_year)
     dividend_data = base_query.order_by(
-        F('book_closure_date').desc(nulls_last=True), '-fiscal_year'
+        F('book_closure_date').desc(nulls_last=True), '-fiscal_year' # <-- Corrected
     ).values_list(
         'fiscal_year', 'symbol', 'company_name',
         'bonus_percent', 'cash_percent', 
@@ -1230,7 +1241,7 @@ def download_dividend_sample_view(request):
 
 @require_POST
 def edit_dividend_view(request, pk):
-    # (This view is unchanged)
+    # (This view is unchanged, but now correct based on your model)
     try:
         dividend = DividendHistory.objects.get(pk=pk)
     except DividendHistory.DoesNotExist:
@@ -1246,11 +1257,11 @@ def edit_dividend_view(request, pk):
     dividend.tax_percent = clean_decimal(request.POST.get('tax_percent'))
     dividend.total_percent = clean_decimal(request.POST.get('total_percent'))
     announcement_date = clean_date(request.POST.get('announcement_date'))
-    book_closure_date = clean_date(request.POST.get('book_closure_date'))
+    book_close_date = clean_date(request.POST.get('book_close_date'))
     distribution_date = clean_date(request.POST.get('distribution_date'))
     bonus_listing_date = clean_date(request.POST.get('bonus_listing_date'))
     dividend.announcement_date = announcement_date if announcement_date else None
-    dividend.book_closure_date = book_closure_date if book_closure_date else None
+    dividend.book_closure_date = book_close_date if book_close_date else None # <-- Corrected
     dividend.distribution_date = distribution_date if distribution_date else None
     dividend.bonus_listing_date = bonus_listing_date if bonus_listing_date else None
     dividend.book_closure_status = request.POST.get('book_closure_status')
@@ -1300,7 +1311,7 @@ def add_dividend_view(request):
         # Get the unique keys
         symbol = request.POST.get('symbol', '').upper()
         fiscal_year = request.POST.get('fiscal_year')
-        book_closure_date = clean_date(request.POST.get('book_closure_date'))
+        book_closure_date = clean_date(request.POST.get('book_close_date')) # <-- Corrected
 
         if not symbol or not fiscal_year:
             messages.error(request, "Symbol and Fiscal Year are required.")
@@ -1358,7 +1369,7 @@ def add_dividend_view(request):
         obj, created = DividendHistory.objects.update_or_create(
             symbol=symbol,
             fiscal_year=fiscal_year, # This is now a validated string
-            book_closure_date=book_closure_date,
+            book_closure_date=book_closure_date, # <-- Corrected
             defaults=data_to_insert
         )
 
@@ -1397,7 +1408,7 @@ def search_dividends_json_view(request):
             'tax_percent': item.tax_percent,
             'total_percent': item.total_percent,
             'announcement_date': item.announcement_date.strftime('%Y-%m-%d') if item.announcement_date else '',
-            'book_closure_date': item.book_closure_date.strftime('%Y-%m-%d') if item.book_closure_date else '',
+            'book_close_date': item.book_closure_date.strftime('%Y-%m-%d') if item.book_closure_date else '', # <-- Corrected
             'book_closure_status': item.book_closure_status,
             'distribution_date': item.distribution_date.strftime('%Y-%m-%d') if item.distribution_date else '',
             'bonus_listing_date': item.bonus_listing_date.strftime('%Y-%m-%d') if item.bonus_listing_date else '',
@@ -1420,3 +1431,161 @@ def company_lookup_json_view(request):
         return JsonResponse({'company_name': ''})
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
+
+
+# --- *** NEW VIEW ADDED (STEP 2) - NOW CORRECTED *** ---
+
+@require_POST
+def sync_dividends_to_adjustments(request):
+    """
+    Reads from DividendHistory and creates PriceAdjustments entries
+    for bonus, right, and high-yield (>10%) cash dividends.
+    """
+    try:
+        # 1. Get all dividend records that matter
+        dividends_to_process = DividendHistory.objects.filter(
+            Q(book_closure_date__isnull=False) &  # <-- CORRECTED (back to 'book_closure_date')
+            (Q(bonus_percent__gt=0) | Q(right_percent__gt=0) | Q(cash_percent__gt=0))
+        ).order_by('book_closure_date') # <-- CORRECTED (back to 'book_closure_date')
+
+        # 2. Get all existing adjustments for fast lookup
+        existing_adjustments = PriceAdjustments.objects.all()
+        # This one is 'book_close_date' because it refers to the PriceAdjustments model
+        existing_set = set(
+            (adj.symbol_id, adj.book_close_date, adj.adjustment_type)
+            for adj in existing_adjustments
+        )
+
+        # 3. Get all company par values into a dict
+        company_par_map = {
+            c.script_ticker: c.par_value
+            for c in Companies.objects.all()
+        }
+
+        # 4. Get all prices into a dict for fast lookup: {(symbol, date): close_price}
+        symbols_with_dividends = set(dividends_to_process.values_list('symbol', flat=True))
+        all_prices_map = {
+            (p['symbol'], p['business_date']): p['close_price']
+            for p in StockPrices.objects.filter(
+                symbol__in=symbols_with_dividends,
+                close_price__isnull=False
+            ).values('symbol', 'business_date', 'close_price')
+        }
+        
+        # Pre-calculate a map of {symbol: [sorted_dates]} for finding record dates
+        symbol_date_map = {}
+        for symbol, date in all_prices_map.keys():
+            if symbol not in symbol_date_map:
+                symbol_date_map[symbol] = []
+            symbol_date_map[symbol].append(date)
+        
+        # Sort all dates for each symbol
+        for symbol in symbol_date_map:
+            symbol_date_map[symbol].sort()
+
+
+        new_adjustments_to_create = []
+        created_count = 0
+        skipped_count = 0
+        failed_cash_calc = 0
+        default_par = Decimal('100.00')
+
+        # 5. Main processing loop
+        for dividend in dividends_to_process:
+            symbol = dividend.symbol
+            bcd = dividend.book_closure_date # <-- CORRECTED (back to 'book_closure_date')
+            par_value = company_par_map.get(symbol, default_par)
+
+            # --- Handle Bonus ---
+            if dividend.bonus_percent and dividend.bonus_percent > 0:
+                key = (symbol, bcd, 'bonus')
+                if key not in existing_set:
+                    new_adjustments_to_create.append(PriceAdjustments(
+                        symbol_id=symbol,
+                        book_close_date=bcd,
+                        adjustment_type='bonus',
+                        adjustment_percent=dividend.bonus_percent,
+                        par_value=par_value,
+                        adjustment_date=datetime.datetime.now()
+                    ))
+                    existing_set.add(key) # Add to set to prevent duplicates in this run
+                    created_count += 1
+                else:
+                    skipped_count += 1
+
+            # --- Handle Right ---
+            if dividend.right_percent and dividend.right_percent > 0:
+                key = (symbol, bcd, 'right')
+                if key not in existing_set:
+                    new_adjustments_to_create.append(PriceAdjustments(
+                        symbol_id=symbol,
+                        book_close_date=bcd,
+                        adjustment_type='right',
+                        adjustment_percent=dividend.right_percent,
+                        par_value=par_value,
+                        adjustment_date=datetime.datetime.now()
+                    ))
+                    existing_set.add(key)
+                    created_count += 1
+                else:
+                    skipped_count += 1
+            
+            # --- Handle Cash (New Logic) ---
+            if dividend.cash_percent and dividend.cash_percent > 0:
+                key = (symbol, bcd, 'cash')
+                if key in existing_set:
+                    skipped_count += 1
+                    continue
+
+                # Find record date (last trading day *before* BCD)
+                record_date = None
+                symbol_dates = symbol_date_map.get(symbol, [])
+                
+                # Find the latest date in our map that is *before* the BCD
+                possible_dates = [d for d in symbol_dates if d < bcd]
+                if possible_dates:
+                    record_date = possible_dates[-1] # Since the list is sorted
+                
+                close_price = all_prices_map.get((symbol, record_date))
+
+                if not record_date or not close_price or close_price <= 0:
+                    print(f"Skipping cash for {symbol} on {bcd}: No close price found on record date {record_date}")
+                    failed_cash_calc += 1
+                    continue
+                
+                # Calculate yield
+                cash_dividend_npr = (dividend.cash_percent / Decimal(100)) * par_value
+                yield_pct = cash_dividend_npr / close_price
+
+                if yield_pct > 0.10:
+                    # High yield, create adjustment
+                    new_adjustments_to_create.append(PriceAdjustments(
+                        symbol_id=symbol,
+                        book_close_date=bcd,
+                        adjustment_type='cash',
+                        adjustment_percent=dividend.cash_percent,
+                        par_value=par_value,
+                        adjustment_date=datetime.datetime.now()
+                    ))
+                    existing_set.add(key)
+                    created_count += 1
+                else:
+                    # Low yield, skip
+                    skipped_count += 1
+
+        # 6. Bulk create all new adjustments
+        if new_adjustments_to_create:
+            PriceAdjustments.objects.bulk_create(new_adjustments_to_create)
+
+        messages.success(request, 
+            f"Dividend Sync Complete! "
+            f"Created: {created_count}, "
+            f"Skipped (already exist or low yield): {skipped_count}, "
+            f"Failed (no price data): {failed_cash_calc}."
+        )
+
+    except Exception as e:
+        messages.error(request, f"An error occurred during sync: {e}")
+
+    return redirect('nepse_data:data_entry')
+# --- *** END OF NEW VIEW *** ---

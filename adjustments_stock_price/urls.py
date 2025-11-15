@@ -24,4 +24,5 @@ urlpatterns = [
     path('start-recalc/', views.start_recalc_view, name='start_recalc'),
     path('recalc-status/<str:job_id>/', views.recalc_status_view, name='recalc_status'),
     path('clear-job/<str:job_id>/', views.clear_job_view, name='clear_job'),
+    path('adjustments/clear-job/<str:job_id>/', views.clear_job_view, name='clear_job'),
 ]

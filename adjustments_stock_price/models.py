@@ -4,6 +4,15 @@ from django.db import models
 from listed_companies.models import Companies
 
 class PriceAdjustments(models.Model):
+    
+    # --- ADDED CHOICES TUPLE ---
+    ADJUSTMENT_TYPE_CHOICES = (
+        ('bonus', 'Bonus Share'),
+        ('right', 'Right Share'),
+        ('cash', 'Cash Dividend'), # <-- New option added
+    )
+    # --- END OF ADDITION ---
+
     # Django will add an 'id' field automatically
     adjustment_date = models.DateTimeField(blank=True, null=True)
     
@@ -16,7 +25,14 @@ class PriceAdjustments(models.Model):
     )
     
     book_close_date = models.DateField()
-    adjustment_type = models.CharField(max_length=10)
+    
+    # --- MODIFIED FIELD ---
+    adjustment_type = models.CharField(
+        max_length=10,
+        choices=ADJUSTMENT_TYPE_CHOICES # <-- Added this line
+    )
+    # --- END OF MODIFICATION ---
+    
     adjustment_percent = models.DecimalField(max_digits=10, decimal_places=4)
     par_value = models.DecimalField(max_digits=10, decimal_places=2)
     records_adjusted = models.IntegerField(blank=True, null=True)

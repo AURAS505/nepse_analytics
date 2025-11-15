@@ -180,53 +180,85 @@
             </div>
         </div>
 
-        <div class="card shadow-sm border-0 mt-5">
-            <div class="card-header bg-secondary text-white">
-                <h5 class="mb-0">Upload Dividend History (Excel/CSV)</h5>
-            </div>
-            <div class="card-body p-4">
-                <p class="card-text">
-                    Upload a bulk file, or click "Manage Entries" to add, edit, delete, 
-                    or clear individual dividend records.
-                </p>
+        <div class="row">
+            <div class="col-xl-10 mx-auto">
 
-                <div class="text-end mb-3">
-                    <a href="{% url 'nepse_data:download_dividend_sample' %}" class="btn btn-sm btn-outline-info">
-                        <i class="bi bi-file-earmark-arrow-down"></i> Download Sample CSV
-                    </a>
-                </div>
-                <hr class="mt-0">
+                <div class="card shadow-sm border-0 mt-5">
+                    <div class="card-header bg-secondary text-white">
+                        <h5 class="mb-0">Upload Dividend History (Excel/CSV)</h5>
+                    </div>
+                    <div class="card-body p-4">
+                        <p class="card-text">
+                            Upload a bulk file, or click "Manage Entries" to add, edit, delete, 
+                            or clear individual dividend records.
+                        </p>
 
-                <form method="POST" action="{% url 'nepse_data:data_entry' %}" enctype="multipart/form-data" class="needs-validation" novalidate>
-                    {% csrf_token %}
-                    <div class="row g-3">
-                        <div class="col-md-12">
-                            <label for="dividend_file" class="form-label"><b>Upload File</b></label>
-                            <input class="form-control" type="file" id="dividend_file" name="dividend_file" accept=".csv,.xlsx,.xls">
+                        <div class="text-end mb-3">
+                            <a href="{% url 'nepse_data:download_dividend_sample' %}" class="btn btn-sm btn-outline-info">
+                                <i class="bi bi-file-earmark-arrow-down"></i> Download Sample CSV
+                            </a>
                         </div>
-                    </div>
-                    <div class="text-end mt-4">
-                        <button type="submit" name="action" value="upload_dividend" class="btn btn-secondary btn-lg ms-2">
-                            <i class="bi bi-upload"></i> Upload File
-                        </button>
-                    </div>
-                </form>
+                        <hr class="mt-0">
 
-                <hr>
-                
-                <div class="text-end">
-                    <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#manageDividendModal">
-                        <i class="bi bi-pencil-square"></i> Manage Entries
-                    </button>
+                        <form method="POST" action="{% url 'nepse_data:data_entry' %}" enctype="multipart/form-data" class="needs-validation" novalidate>
+                            {% csrf_token %}
+                            <div class="row g-3">
+                                <div class="col-md-12">
+                                    <label for="dividend_file" class="form-label"><b>Upload File</b></label>
+                                    <input class="form-control" type="file" id="dividend_file" name="dividend_file" accept=".csv,.xlsx,.xls">
+                                </div>
+                            </div>
+                            <div class="text-end mt-4">
+                                <button type="submit" name="action" value="upload_dividend" class="btn btn-secondary btn-lg ms-2">
+                                    <i class="bi bi-upload"></i> Upload File
+                                </button>
+                            </div>
+                        </form>
+
+                        <hr>
+                        
+                        <div class="text-end">
+                            <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#manageDividendModal">
+                                <i class="bi bi-pencil-square"></i> Manage Entries
+                            </button>
+                        </div>
+
+                    </div>
                 </div>
 
-            </div>
-        </div>
-
-        <div class="card shadow-sm border-0 mt-5">
-            <div class="card-header bg-warning">
-                <h5 class="mb-0">Recalculate All Adjusted Prices</h5>
-            </div>
+                <div class="card shadow-sm border-0 mt-5">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="mb-0">Sync Dividend History to Adjustment Tool</h5>
+                    </div>
+                    <div class="card-body p-4">
+                        <p class="card-text">
+                            This will read your <strong>Dividend History</strong> table and automatically create
+                            adjustment entries in the <strong>Stock Price Adjustment Tool</strong> for:
+                            <br>1. All <strong>Bonus Shares</strong>.
+                            <br>2. All <strong>Right Shares</strong>.
+                            <br>3. All <strong>Cash Dividends</strong> with a yield > 10% (based on par value and record date price).
+                        </p>
+                        <p class="card-text">
+                            It will skip any adjustments that already exist.
+                        </p>
+                        <hr>
+                        <form method="POST" action="{% url 'nepse_data:sync_dividends_to_adjustments' %}">
+                            {% csrf_token %}
+                            <div class="text-end">
+                                <button type="submit" class="btn btn-primary btn-lg" 
+                                        onclick="return confirm('This will scan all dividends and create new adjustment entries. This process cannot be undone. Are you sure you want to continue?');">
+                                    <i class="bi bi-arrow-repeat"></i>
+                                    Start Sync
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+                <div class="card shadow-sm border-0 mt-5">
+                    <div class="card-header bg-warning">
+                        <h5 class="mb-0">Recalculate All Adjusted Prices</h5>
+                    </div>
+            
             <div class="card-body p-4">
                 <p classV="card-text">
                     Click this button to run the optimized recalculation process. This will:

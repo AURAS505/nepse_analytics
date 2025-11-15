@@ -40,7 +40,8 @@
                             <select id="adjustment_type" name="adjustment_type" required class="form-select">
                                 <option value="bonus" {% if adjustment.adjustment_type == 'bonus' %}selected{% endif %}>Bonus Share</option>
                                 <option value="right" {% if adjustment.adjustment_type == 'right' %}selected{% endif %}>Right Share</option>
-                            </select>
+                                <option value="cash" {% if adjustment.adjustment_type == 'cash' %}selected{% endif %}>Cash Dividend</option>
+                                </select>
                         </div>
                         
                         <div class="col-md-6">

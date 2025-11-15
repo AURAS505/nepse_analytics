@@ -14,8 +14,11 @@ urlpatterns = [
     path('download-indices/', views.download_indices_view, name='download_indices'),
     
     # --- THESE ARE THE MISSING LINES ---
-
-
+    
+    # --- *** NEW URL ADDED (STEP 3) *** ---
+    path('data-entry/sync-dividends/', views.sync_dividends_to_adjustments, name='sync_dividends_to_adjustments'),
+    # --- *** END OF NEW URL *** ---
+    
     
     path('market-cap/', views.market_cap_view, name='market_cap'),
     path('download-marcap/', views.download_marcap_view, name='download_marcap'),
