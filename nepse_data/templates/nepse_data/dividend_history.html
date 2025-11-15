@@ -9,7 +9,7 @@
         <div class="col-12">
             
             <h1 class="display-6 fw-bold">{{ title }}</h1>
-            <p class="fs-5 text-muted">View all historical dividend data. Use the filters to narrow your search.</p>
+            <p class="fs-5 text-muted">View all historical dividend and right share data. Use the filters to narrow your search.</p>
 
             {% if messages %}
                 {% for message in messages %}
@@ -77,6 +77,7 @@
                                     <th scope="col">Company</th>
                                     <th scope="col" class="text-end">Bonus %</th>
                                     <th scope="col" class="text-end">Cash %</th>
+                                    <th scope="col" class="text-end">Right %</th>
                                     <th scope="col" class="text-end">Tax %</th>
                                     <th scope="col" class="text-end">Total %</th>
                                     <th scope="col">Announced</th>
@@ -93,6 +94,7 @@
                                     <td>{{ item.company_name|default:'-'|truncatechars:30 }}</td>
                                     <td class="text-end">{{ item.bonus_percent|default_if_none:'-' }}</td>
                                     <td class="text-end">{{ item.cash_percent|default_if_none:'-' }}</td>
+                                    <td class="text-end">{{ item.right_percent|default_if_none:'-' }}</td>
                                     <td class="text-end">{{ item.tax_percent|default_if_none:'-' }}</td>
                                     <td class="text-end fw-bold">{{ item.total_percent|default_if_none:'-' }}</td>
                                     <td>{{ item.announcement_date|date:"Y-m-d"|default:'-' }}</td>
@@ -102,7 +104,7 @@
                                 </tr>
                                 {% empty %}
                                 <tr>
-                                    <td colspan="11" class="text-center p-4">
+                                    <td colspan="12" class="text-center p-4">
                                         <h4 class="text-muted">No dividend data found.</h4>
                                         <p>Try clearing your filters or <a href="{% url 'nepse_data:data_entry' %}">uploading new data</a>.</p>
                                     </td>

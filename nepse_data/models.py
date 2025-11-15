@@ -165,7 +165,7 @@ class DividendHistory(models.Model):
         help_text="Tax for dividend purpose"
     )
     # --- End of added field ---
-    
+    right_percent = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     total_percent = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
     
     announcement_date = models.DateField(blank=True, null=True)
@@ -178,7 +178,7 @@ class DividendHistory(models.Model):
         db_table = 'dividend_history'
         verbose_name = 'Dividend History'
         verbose_name_plural = 'Dividend Histories'
-        ordering = ['-announcement_date', 'symbol'] # Show newest first
+        unique_together = ('symbol', 'fiscal_year', 'book_closure_date') # Show newest first
 
     def __str__(self):
         return f"{self.symbol} - {self.fiscal_year} ({self.total_percent}%)"

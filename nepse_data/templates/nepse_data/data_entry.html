@@ -400,7 +400,20 @@
                         <div class="col-md-6">
                             <div class="mb-3">
                                 <label for="add_fiscal_year" class="form-label">Fiscal Year</label>
-                                <input type="text" class="form-control" id="add_fiscal_year" name="fiscal_year" placeholder="e.g., 2079/80">
+                                
+                                <input class="form-control" 
+                                    list="fiscal_year_options" 
+                                    id="add_fiscal_year" 
+                                    name="fiscal_year" 
+                                    placeholder="e.g., 2080/81"
+                                    value="{% if current_fiscal_year %}{{ current_fiscal_year.fiscal_year }}{% endif %}"
+                                    required>
+                                
+                                <datalist id="fiscal_year_options">
+                                    {% for fy in all_fiscal_years %}
+                                        <option value="{{ fy.fiscal_year }}">
+                                    {% endfor %}
+                                </datalist>
                             </div>
                             <div class="mb-3">
                                 <label for="add_symbol" class="form-label">Symbol</label>
@@ -417,13 +430,17 @@
                         </div>
                         <div class="col-md-6">
                             <div class="row">
-                                <div class="col-6 mb-3">
+                                <div class="col-4 mb-3">
                                     <label for="add_bonus_percent" class="form-label">Bonus %</label>
                                     <input type="number" step="0.01" class="form-control" id="add_bonus_percent" name="bonus_percent" placeholder="0.00">
                                 </div>
-                                <div class="col-6 mb-3">
+                                <div class="col-4 mb-3">
                                     <label for="add_cash_percent" class="form-label">Cash %</label>
                                     <input type="number" step="0.01" class="form-control" id="add_cash_percent" name="cash_percent" placeholder="0.00">
+                                </div>
+                                <div class="col-4 mb-3">
+                                    <label for="add_right_percent" class="form-label">Right %</label>
+                                    <input type="number" step="0.01" class="form-control" id="add_right_percent" name="right_percent" placeholder="0.00">
                                 </div>
                                 <div class="col-6 mb-3">
                                     <label for="add_tax_percent" class="form-label">Tax %</label>
@@ -498,13 +515,17 @@
                         </div>
                         <div class="col-md-6">
                             <div class="row">
-                                <div class="col-6 mb-3">
+                                <div class="col-4 mb-3">
                                     <label for="edit_bonus_percent" class="form-label">Bonus %</label>
                                     <input type="number" step="0.01" class="form-control" id="edit_bonus_percent" name="bonus_percent">
                                 </div>
-                                <div class="col-6 mb-3">
+                                <div class="col-4 mb-3">
                                     <label for="edit_cash_percent" class="form-label">Cash %</label>
                                     <input type="number" step="0.01" class="form-control" id="edit_cash_percent" name="cash_percent">
+                                </div>
+                                <div class="col-4 mb-3">
+                                    <label for="edit_right_percent" class="form-label">Right %</label>
+                                    <input type="number" step="0.01" class="form-control" id="edit_right_percent" name="right_percent">
                                 </div>
                                 <div class="col-6 mb-3">
                                     <label for="edit_tax_percent" class="form-label">Tax %</label>
@@ -762,6 +783,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+    // --- Store all URLs ---
+    const URLS = JSON.parse(document.getElementById('js-urls').textContent);
     
     // --- Store all modals in variables ---
     const manageModalEl = document.getElementById('manageDividendModal');
@@ -871,6 +894,11 @@ document.addEventListener('DOMContentLoaded', function() {
             form.querySelector('#edit_book_closure_status').value = itemData.book_closure_status || '';
             form.querySelector('#edit_bonus_percent').value = itemData.bonus_percent || '';
             form.querySelector('#edit_cash_percent').value = itemData.cash_percent || '';
+            
+            // --- THIS IS THE NEWLY ADDED LINE ---
+            form.querySelector('#edit_right_percent').value = itemData.right_percent || '';
+            // --- END OF ADDITION ---
+            
             form.querySelector('#edit_tax_percent').value = itemData.tax_percent || '';
             form.querySelector('#edit_total_percent').value = itemData.total_percent || '';
             form.querySelector('#edit_announcement_date').value = itemData.announcement_date || '';
@@ -879,7 +907,7 @@ document.addEventListener('DOMContentLoaded', function() {
             form.querySelector('#edit_bonus_listing_date').value = itemData.bonus_listing_date || '';
             
             // Set form action and labels
-            form.action = URLS.dividendEdit.replace('0', itemData.id); // <-- This is the fix
+            form.action = URLS.dividendEdit.replace('0', itemData.id);
             editModalEl.querySelector('#edit-id-display').textContent = itemData.id;
             editModalEl.querySelector('#edit-symbol-display').textContent = itemData.symbol;
         }
@@ -891,11 +919,13 @@ document.addEventListener('DOMContentLoaded', function() {
             const fy = button.getAttribute('data-fy');
             const form = deleteModalEl.querySelector('#deleteDividendForm');
 
-            form.action = URLS.dividendDelete.replace('0', dividendId); // <-- This is the fix
+            form.action = URLS.dividendDelete.replace('0', dividendId);
             deleteModalEl.querySelector('#delete-symbol-display').textContent = symbol;
             deleteModalEl.querySelector('#delete-fy-display').textContent = fy;
         }
-    const URLS = JSON.parse(document.getElementById('js-urls').textContent);
+    }); // <-- This was the missing closing brace in your original file
+
+    // --- 3. Company Name Lookup ---
     const fetchCompanyName = (symbolInput, companyNameInput) => {
         const symbol = symbolInput.value.trim().toUpperCase();
         if (symbol.length < 2) {

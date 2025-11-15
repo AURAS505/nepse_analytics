@@ -10,14 +10,24 @@ from django.views.decorators.http import require_POST
 from adjustments_stock_price.models import StockPricesAdj
 import io
 import csv
-import pandas as pd  # <-- THIS WAS THE MISSING IMPORT
+import pandas as pd
 from decimal import Decimal, InvalidOperation
 from django.core.paginator import Paginator
-from django.db.models import Q, Max, Sum
+from django.db.models import Q, Max, Sum, F
 from .models import StockPrices, Indices, Marcap, FloorsheetRaw, DividendHistory
 from django.http import JsonResponse
 from django.db.models import Value
 from django.db.models.functions import Concat
+
+# This is the correct import for your FiscalYear model
+from nepali_datetime.models import FiscalYear, NepaliCalendar
+
+# --- ADDED IMPORTS (STEP 3) ---
+from nepali_datetime.utils import (
+    bs_to_ad, NEPALI_CALENDAR_DATA
+)
+import re # For parsing the fiscal year string
+# --- END OF ADDED IMPORTS ---
 
 
 # ==================================
@@ -105,7 +115,7 @@ def buyer_seller_to_int(value):
 # ==================================
 
 def todays_price_view(request):
-    # (This view is unchanged and correct)
+    # (This view is unchanged)
     view = request.GET.get('view', 'date')
     selected_date_str = request.GET.get('selected_date')
     search_term = request.GET.get('search_term', '').strip()
@@ -235,7 +245,7 @@ def todays_price_view(request):
     return render(request, 'nepse_data/todays_price.html', context)
 
 def download_stock_prices_view(request):
-    # (This view is unchanged and correct)
+    # (This view is unchanged)
     view = request.GET.get('view', 'date')
     selected_date_str = request.GET.get('selected_date')
     search_term = request.GET.get('search_term', '').strip()
@@ -346,7 +356,7 @@ def download_stock_prices_view(request):
 def data_entry_view(request):
     if request.method == 'POST':
         if request.POST.get('action') == 'upload_price':
-            # --- HANDLE PRICE UPLOAD (NOW USES CLEAN HELPERS) ---
+            # --- HANDLE PRICE UPLOAD (Unchanged) ---
             price_file = request.FILES.get('price_file')
             if not price_file:
                 messages.error(request, "No file selected for uploading.")
@@ -355,7 +365,7 @@ def data_entry_view(request):
                 messages.error(request, "Invalid file type. Please upload a .csv file.")
                 return redirect('nepse_data:data_entry')
             try:
-                csv_file = io.TextIOWrapper(price_file.file, encoding='utf-8')
+                csv_file = io.TextIOWrapper(price_file.file, encoding='utf-8-sig')
                 reader = csv.reader(csv_file)
                 header = next(reader)
                 expected_columns = len(header)
@@ -415,7 +425,7 @@ def data_entry_view(request):
             return redirect('nepse_data:data_entry')
 
         elif request.POST.get('action') == 'upload_indices':
-            # --- HANDLE INDICES UPLOAD (NOW USES CLEAN HELPERS & DECIMAL MODEL) ---
+            # --- HANDLE INDICES UPLOAD (Unchanged) ---
             indices_file = request.FILES.get('indices_file')
             if not indices_file:
                 messages.error(request, "No indices file selected.")
@@ -424,7 +434,7 @@ def data_entry_view(request):
                 messages.error(request, "Invalid file type. Please upload a .csv file.")
                 return redirect('nepse_data:data_entry')
             try:
-                csv_file = io.TextIOWrapper(indices_file.file, encoding='utf-8')
+                csv_file = io.TextIOWrapper(indices_file.file, encoding='utf-8-sig')
                 reader = csv.reader(csv_file)
                 header = next(reader)
                 inserted_rows, skipped_rows, failed_rows = 0, 0, 0
@@ -462,7 +472,7 @@ def data_entry_view(request):
             return redirect('nepse_data:data_entry')
 
         elif request.POST.get('action') == 'upload_marcap':
-            # --- HANDLE MARKET CAP UPLOAD (THIS IS THE CORRECTED LOGIC) ---
+            # --- HANDLE MARKET CAP UPLOAD (Unchanged) ---
             marcap_file = request.FILES.get('marcap_file')
             if not marcap_file:
                 messages.error(request, "No market cap file selected.")
@@ -472,7 +482,7 @@ def data_entry_view(request):
                 return redirect('nepse_data:data_entry')
             
             try:
-                df = pd.read_csv(marcap_file)
+                df = pd.read_csv(marcap_file, encoding='utf-8-sig')
                 
                 df.columns = df.columns.str.strip().str.lower().str.replace(' ', '_')
                 
@@ -522,8 +532,8 @@ def data_entry_view(request):
                 messages.error(request, f"An error occurred during market cap upload: {e}")
             return redirect('nepse_data:data_entry')
         
-        # --- NEW FLOORSHEET UPLOAD LOGIC ---
         elif request.POST.get('action') == 'upload_floorsheet':
+            # --- FLOORSHEET UPLOAD LOGIC (Unchanged) ---
             floorsheet_file = request.FILES.get('floorsheet_file')
             date_str = request.POST.get('floorsheet_date')
 
@@ -540,10 +550,9 @@ def data_entry_view(request):
                 messages.error(request, "Invalid date format.")
                 return redirect('nepse_data:data_entry')
 
-            # --- Read file using Pandas (handles both Excel and CSV) ---
             try:
                 if floorsheet_file.name.endswith('.csv'):
-                    df = pd.read_csv(floorsheet_file)
+                    df = pd.read_csv(floorsheet_file, encoding='utf-8-sig')
                 else:
                     df = pd.read_excel(floorsheet_file)
                 df.columns = [col.upper().strip() for col in df.columns]
@@ -551,21 +560,18 @@ def data_entry_view(request):
                 messages.error(request, f"Error reading file: {e}")
                 return redirect('nepse_data:data_entry')
 
-            # --- Validate required columns ---
             required_cols = ['SN', 'CONTRACT NO.', 'STOCK SYMBOL', 'BUYER', 'SELLER', 'QUANTITY', 'RATE (RS)', 'AMOUNT (RS)']
             if not all(col in df.columns for col in required_cols):
                 missing = [col for col in required_cols if col not in df.columns]
                 messages.error(request, f"File is missing required columns: {', '.join(missing)}")
                 return redirect('nepse_data:data_entry')
 
-            # --- Get the Sector Map (using Django ORM) ---
             sector_map = {
                 k.upper(): v for k, v in
                 Companies.objects.values_list('script_ticker', 'sector')
                 if k
             }
             
-            # --- Delete existing data for this date (from SQL_Importer logic) ---
             with connection.cursor() as cursor:
                 print(f"Deleting existing records for {calculation_date}")
                 cursor.execute("DELETE FROM floorsheet_raw WHERE calculation_date = %s", [calculation_date])
@@ -574,7 +580,6 @@ def data_entry_view(request):
                 cursor.execute("DELETE FROM sector_buyer_summary WHERE calculation_date = %s", [calculation_date])
                 cursor.execute("DELETE FROM sector_seller_summary WHERE calculation_date = %s", [calculation_date])
 
-            # --- Prepare records for bulk creation ---
             records_to_insert = []
             failed_rows = 0
             for index, row in df.iterrows():
@@ -583,7 +588,6 @@ def data_entry_view(request):
                     stock_symbol = str(row['STOCK SYMBOL']).upper()
                     sector = sector_map.get(stock_symbol, None)
 
-                    # Replicate the unique ID logic from SQL_Importer.py
                     new_id = int(f"{calculation_date.strftime('%Y%m%d')}{original_id:06d}")
 
                     records_to_insert.append(FloorsheetRaw(
@@ -602,15 +606,12 @@ def data_entry_view(request):
                     print(f"Skipping row {index}: {e}")
                     failed_rows += 1
 
-            # --- Insert all records in a single batch ---
             FloorsheetRaw.objects.bulk_create(records_to_insert, ignore_conflicts=True)
             inserted_count = len(records_to_insert)
 
-            # --- Now, repopulate the summary tables (Raw SQL from SQL_Importer.py) ---
             with connection.cursor() as cursor:
                 print(f"Populating summary tables for {calculation_date}...")
                 
-                # BUYER SUMMARY - PER COMPANY
                 cursor.execute("""
                     INSERT INTO buyer_summary (calculation_date, stock_symbol, buyer, sector, total_quantity, total_amount, average_rate)
                     SELECT calculation_date, stock_symbol, buyer, sector, SUM(quantity), SUM(amount), SUM(amount) / SUM(quantity)
@@ -620,7 +621,6 @@ def data_entry_view(request):
                         total_amount = VALUES(total_amount), average_rate = VALUES(average_rate);
                 """, [calculation_date])
 
-                # SELLER SUMMARY - PER COMPANY
                 cursor.execute("""
                     INSERT INTO seller_summary (calculation_date, stock_symbol, seller, sector, total_quantity, total_amount, average_rate)
                     SELECT calculation_date, stock_symbol, seller, sector, SUM(quantity), SUM(amount), SUM(amount) / SUM(quantity)
@@ -630,7 +630,6 @@ def data_entry_view(request):
                         total_amount = VALUES(total_amount), average_rate = VALUES(average_rate);
                 """, [calculation_date])
 
-                # SECTOR BUYER SUMMARY - PER SECTOR
                 cursor.execute("""
                     INSERT INTO sector_buyer_summary (calculation_date, sector, buyer, total_quantity, total_amount, average_rate)
                     SELECT calculation_date, sector, buyer, SUM(quantity), SUM(amount), SUM(amount) / SUM(quantity)
@@ -639,7 +638,6 @@ def data_entry_view(request):
                         total_quantity = VALUES(total_quantity), total_amount = VALUES(total_amount), average_rate = VALUES(average_rate);
                 """, [calculation_date])
 
-                # SECTOR SELLER SUMMARY - PER SECTOR
                 cursor.execute("""
                     INSERT INTO sector_seller_summary (calculation_date, sector, seller, total_quantity, total_amount, average_rate)
                     SELECT calculation_date, sector, seller, SUM(quantity), SUM(amount), SUM(amount) / SUM(quantity)
@@ -651,46 +649,36 @@ def data_entry_view(request):
             messages.success(request, f"Floorsheet upload for {calculation_date} successful! Inserted {inserted_count} records. Skipped {failed_rows} rows. Summary tables updated.")
             return redirect('nepse_data:data_entry')
     
-    # ... (inside data_entry_view, after the 'upload_floorsheet' block)
 
-# --- NEW DIVIDEND HISTORY UPLOAD LOGIC ---
+        # --- MODIFIED DIVIDEND HISTORY UPLOAD LOGIC (STEP 3b) ---
         elif request.POST.get('action') == 'upload_dividend':
             dividend_file = request.FILES.get('dividend_file')
             if not dividend_file:
                 messages.error(request, "No dividend history file selected.")
                 return redirect('nepse_data:data_entry')
 
-            # --- Read file using Pandas (handles both Excel and CSV) ---
             try:
                 if dividend_file.name.endswith('.csv'):
-                    df = pd.read_csv(dividend_file)
+                    df = pd.read_csv(dividend_file, encoding='utf-8-sig')
                 else:
                     df = pd.read_excel(dividend_file)
                 
-                # --- THIS IS THE CORRECTED STANDARDIZATION LOGIC ---
                 df.columns = (
                     df.columns.str.strip()
                     .str.lower()
-                    # 1. Handle "Bonus (%)" -> "bonus_percent"
                     .str.replace(' (%)', '_percent', regex=False)
-                    # 2. Handle "Bonus(%)" (no space) -> "bonus_percent"
                     .str.replace('(%', '_percent', regex=False)
-                    # 3. Handle "Bonus %" -> "bonus_percent"
                     .str.replace(' %', '_percent', regex=False)
-                    # 4. Handle "Fiscal Year" -> "fiscal_year"
                     .str.replace(' ', '_', regex=False)
-                    # 5. Clean up any remaining characters
                     .str.replace('.', '', regex=False)
                     .str.replace('/', '_', regex=False)
                     .str.replace(')', '', regex=False)
                 )
-                # --- END OF FIX ---
 
             except Exception as e:
                 messages.error(request, f"Error reading file: {e}")
                 return redirect('nepse_data:data_entry')
 
-            # --- Get Company Map for names ---
             company_map = {
                 k: v for k, v in
                 Companies.objects.values_list('script_ticker', 'company_name')
@@ -699,46 +687,75 @@ def data_entry_view(request):
             
             inserted_rows, updated_rows, failed_rows = 0, 0, 0
 
-            # --- Iterate through DataFrame rows ---
             for index, row in df.iterrows():
                 try:
-                    symbol = str(row['symbol']).strip().upper()
-                    if not symbol:
+                    symbol = str(row.get('symbol', '')).strip().upper()
+                    fiscal_year = str(row.get('fiscal_year', '')).strip()
+
+                    if not symbol or not fiscal_year:
+                        print(f"Skipping row {index}: Missing Symbol or Fiscal Year. Symbol: '{symbol}', FY: '{fiscal_year}'")
                         failed_rows += 1
                         continue
 
-                    fiscal_year = str(row.get('fiscal_year', '')).strip() or None
-                    
-                    # 1. Define what makes a record unique
+                    # --- NEW: Find or create the FiscalYear object ---
+                    try:
+                        if not re.match(r'^\d{4}/\d{2}$', fiscal_year):
+                            raise ValueError("Invalid FY format. Expected '2079/80'.")
+                            
+                        bs_start_year = int(fiscal_year.split('/')[0])
+                        bs_end_year = bs_start_year + 1
+                        
+                        ad_start_date = bs_to_ad(bs_start_year, 4, 1) # Shrawan 1
+                        bs_end_day = NEPALI_CALENDAR_DATA[bs_end_year][2] # Ashadh (index 2)
+                        ad_end_date = bs_to_ad(bs_end_year, 3, bs_end_day) # Ashadh end
+                        total_days = (ad_end_date - ad_start_date).days + 1
+                        
+                        defaults = {
+                            'bs_start_year': bs_start_year,
+                            'bs_end_year': bs_end_year,
+                            'bs_end_day': bs_end_day,
+                            'ad_start_date': ad_start_date,
+                            'ad_end_date': ad_end_date,
+                            'total_days': total_days,
+                        }
+                        
+                        fy_obj, fy_created = FiscalYear.objects.get_or_create(
+                            fiscal_year=fiscal_year,
+                            defaults=defaults
+                        )
+                        if fy_created:
+                            print(f"Created new FiscalYear: {fiscal_year}")
+                            
+                    except Exception as e:
+                        print(f"Skipping row {index}: Could not validate/create FiscalYear '{fiscal_year}'. Error: {e}")
+                        failed_rows += 1
+                        continue
+                    # --- END OF NEW FY LOGIC ---
+
+                    announcement_date = clean_date(row.get('announcement_date'))
+                    book_closure_date = clean_date(row.get('book_closure_date')) 
+                    distribution_date = clean_date(row.get('distribution_date'))
+                    bonus_listing_date = clean_date(row.get('bonus_listing_date'))
+
                     unique_key = {
                         'symbol': symbol,
                         'fiscal_year': fiscal_year,
+                        'book_closure_date': book_closure_date 
                     }
-
-                    # 2. Get all date fields
-                    announcement_date = clean_date(row.get('announcement_date'))
-                    book_closure_date = clean_date(row.get('book_closure_date'))
-                    distribution_date = clean_date(row.get('distribution_date'))
-                    bonus_listing_date = clean_date(row.get('bonus_listing_date'))
                     
-                    # 3. Define ALL data fields to be inserted or updated
                     data_to_insert = {
                         'company_name': company_map.get(symbol, row.get('company_name', None)),
-                        
-                        # This will now correctly find 'bonus_percent', etc.
                         'bonus_percent': clean_decimal(row.get('bonus_percent')),
                         'cash_percent': clean_decimal(row.get('cash_percent')),
+                        'right_percent': clean_decimal(row.get('right_percent')),
                         'tax_percent': clean_decimal(row.get('tax_percent')),
                         'total_percent': clean_decimal(row.get('total_percent')),
-                        
                         'announcement_date': announcement_date,
-                        'book_closure_date': book_closure_date,
                         'book_closure_status': str(row.get('book_closure_status', '')).strip() or None,
                         'distribution_date': distribution_date,
                         'bonus_listing_date': bonus_listing_date,
                     }
                     
-                    # 4. Call update_or_create
                     obj, created = DividendHistory.objects.update_or_create(
                         **unique_key,
                         defaults=data_to_insert
@@ -755,17 +772,36 @@ def data_entry_view(request):
 
             messages.success(request, f"Dividend History upload successful! Created {inserted_rows} new records. Updated {updated_rows} records. Failed {failed_rows} rows.")
             return redirect('nepse_data:data_entry')
+        
+        else:
+            messages.warning(request, "Unknown action.")
+            return redirect('nepse_data:data_entry')
 
     else:
-        # --- HANDLE GET REQUEST (Unchanged) ---
-        available_dates = StockPrices.objects.values('business_date').distinct().order_by('-business_date')
+        # --- HANDLE GET REQUEST (MODIFIED IN STEP 1) ---
+        
+        # 1. Fetch available dates for the 'Delete Price Data' modal
+        available_dates = StockPrices.objects.values('business_date') \
+                                            .distinct() \
+                                            .order_by('-business_date')
 
-        available_floorsheet_dates = FloorsheetRaw.objects.values('calculation_date').distinct().order_by('-calculation_date')
+        # 2. Fetch available dates for the 'Delete Floorsheet Data' modal
+        available_floorsheet_dates = FloorsheetRaw.objects.values('calculation_date') \
+                                                        .distinct() \
+                                                        .order_by('-calculation_date')
 
+        # 3. Fetch Fiscal Year data (as per your new requirement)
+        all_fiscal_years = FiscalYear.objects.all().order_by('-fiscal_year')
+        current_fiscal_year = FiscalYear.get_current_fiscal_year()
+
+
+        # 4. Assemble the final context
         context = {
             'title': 'Data Entry Portal',
             'available_dates': available_dates,
-            'available_floorsheet_dates': available_floorsheet_dates
+            'available_floorsheet_dates': available_floorsheet_dates,
+            'all_fiscal_years': all_fiscal_years,
+            'current_fiscal_year': current_fiscal_year,
         }
         return render(request, 'nepse_data/data_entry.html', context)
     
@@ -773,6 +809,7 @@ def data_entry_view(request):
 
 @require_POST
 def delete_floorsheet_data_view(request):
+    # (This view is unchanged)
     dates_to_delete = request.POST.getlist('dates_to_delete')
     if not dates_to_delete:
         messages.warning(request, "No dates were selected for deletion.")
@@ -780,16 +817,12 @@ def delete_floorsheet_data_view(request):
     
     try:
         with connection.cursor() as cursor:
-            # Create a string of placeholders (%s, %s, %s)
             placeholders = ','.join(['%s'] * len(dates_to_delete))
             
-            # Delete from summary tables first
             cursor.execute(f"DELETE FROM sector_seller_summary WHERE calculation_date IN ({placeholders})", dates_to_delete)
             cursor.execute(f"DELETE FROM sector_buyer_summary WHERE calculation_date IN ({placeholders})", dates_to_delete)
             cursor.execute(f"DELETE FROM seller_summary WHERE calculation_date IN ({placeholders})", dates_to_delete)
             cursor.execute(f"DELETE FROM buyer_summary WHERE calculation_date IN ({placeholders})", dates_to_delete)
-            
-            # Finally, delete from the raw floorsheet table
             cursor.execute(f"DELETE FROM floorsheet_raw WHERE calculation_date IN ({placeholders})", dates_to_delete)
 
         messages.success(request, f"Successfully deleted all floorsheet and summary data for {len(dates_to_delete)} selected date(s).")
@@ -802,7 +835,7 @@ def delete_floorsheet_data_view(request):
 
 @require_POST
 def delete_price_data_view(request):
-    # (This view is unchanged and correct)
+    # (This view is unchanged)
     dates_to_delete = request.POST.getlist('dates_to_delete')
     if not dates_to_delete:
         messages.warning(request, "No dates were selected for deletion.")
@@ -816,7 +849,7 @@ def delete_price_data_view(request):
     return redirect('nepse_data:data_entry')
 
 def indices_view(request):
-    # (This view is unchanged and correct)
+    # (This view is unchanged)
     indices_data = []
     view = request.GET.get('view', 'date')
     selected_date_str = request.GET.get('selected_date')
@@ -869,7 +902,7 @@ def indices_view(request):
     return render(request, 'nepse_data/indices.html', {'title': 'Indices', 'view': view})
 
 def download_indices_view(request):
-    # (This view is unchanged and correct)
+    # (This view is unchanged)
     view = request.GET.get('view', 'date')
     search_term = request.GET.get('search_term', '').strip()
     selected_date_str = request.GET.get('selected_date')
@@ -916,7 +949,7 @@ def download_indices_view(request):
     return response
 
 def market_cap_view(request):
-    # (This view is unchanged and correct)
+    # (This view is unchanged)
     title = "Market Capitalization History"
     page = request.GET.get('page', 1)
     per_page_str = request.GET.get('per_page', '20')
@@ -938,7 +971,7 @@ def market_cap_view(request):
     return render(request, 'nepse_data/market_cap.html', context)
 
 def download_marcap_view(request):
-    # (This view is unchanged and correct)
+    # (This view is unchanged)
     marcap_data = Marcap.objects.all().order_by('-business_date').values_list(
         'id', 'sn', 'business_date', 'market_capitalization',
         'sensitive_market_capitalization', 'float_market_capitalization',
@@ -963,34 +996,23 @@ def download_marcap_view(request):
     return response
 
 def floorsheet_view(request):
+    # (This view is unchanged)
     title = "Floorsheet History"
-
-    # --- Get filter parameters ---
     selected_date_str = request.GET.get('selected_date')
     contract_no = request.GET.get('contract_no', '').strip()
     stock_symbol = request.GET.get('stock_symbol', '').strip()
     buyer = request.GET.get('buyer', '').strip()
     seller = request.GET.get('seller', '').strip()
-
-    # --- Get pagination parameters ---
     page = request.GET.get('page', 1)
     per_page_str = request.GET.get('per_page', '20')
-
-    # --- NEW: Get sorting parameters ---
     sort_by = request.GET.get('sort', 'contract_no')
     direction = request.GET.get('dir', 'desc')
-
-    # --- NEW: Whitelist allowed sort fields to prevent errors/injection ---
     allowed_sort_fields = ['contract_no', 'quantity', 'amount']
     if sort_by not in allowed_sort_fields:
         sort_by = 'contract_no'
     if direction not in ['asc', 'desc']:
         direction = 'desc'
-
-    # --- Base query ---
     base_query = FloorsheetRaw.objects.all()
-
-    # --- 1. Date Filter ---
     query_date = None
     if selected_date_str:
         try:
@@ -1001,12 +1023,9 @@ def floorsheet_view(request):
         latest_date_result = FloorsheetRaw.objects.aggregate(max_date=Max('calculation_date'))
         if latest_date_result['max_date']:
             query_date = latest_date_result['max_date']
-
     if query_date:
         base_query = base_query.filter(calculation_date=query_date)
         selected_date_str = query_date.isoformat()
-
-    # --- 2. Other Filters ---
     if contract_no:
         base_query = base_query.filter(contract_no=contract_no)
     if stock_symbol:
@@ -1015,48 +1034,30 @@ def floorsheet_view(request):
         base_query = base_query.filter(buyer=buyer)
     if seller:
         base_query = base_query.filter(seller=seller)
-
-    # --- Calculate totals (before pagination) ---
     totals = base_query.aggregate(
         total_quantity=Sum('quantity'),
         total_amount=Sum('amount')
     )
-
-    # --- NEW: Apply dynamic server-side sorting ---
     sort_param = sort_by
     if direction == 'desc':
         sort_param = f"-{sort_by}"
-    
-    # We add '-id' as a secondary sort to ensure a stable,
-    # predictable order if two values are identical.
     base_query = base_query.order_by(sort_param, '-id')
-
-    # --- 3. Pagination ---
     paginator = Paginator(base_query, int(per_page_str), allow_empty_first_page=True)
     page_obj = paginator.get_page(page)
-
     context = {
         'floorsheet_data': page_obj,
         'title': title,
-
-        # Pagination context
         'page_obj': page_obj,
         'paginator': paginator,
         'per_page': per_page_str,
         'page': page,
-
-        # Filter values
         'selected_date': selected_date_str,
         'contract_no': contract_no,
         'stock_symbol': stock_symbol,
         'buyer': buyer,
         'seller': seller,
-
-        # Totals
         'total_quantity': totals['total_quantity'],
         'total_amount': totals['total_amount'],
-        
-        # --- NEW: Pass sorting state to template ---
         'current_sort': sort_by,
         'current_dir': direction,
     }
@@ -1064,16 +1065,13 @@ def floorsheet_view(request):
 
 
 def download_floorsheet_view(request):
-    # --- Get all the same filter parameters ---
+    # (This view is unchanged)
     selected_date_str = request.GET.get('selected_date')
     contract_no = request.GET.get('contract_no', '').strip()
     stock_symbol = request.GET.get('stock_symbol', '').strip()
     buyer = request.GET.get('buyer', '').strip()
     seller = request.GET.get('seller', '').strip()
-
     base_query = FloorsheetRaw.objects.all()
-
-    # --- Apply Date Filter ---
     query_date = None
     if selected_date_str:
         try:
@@ -1084,11 +1082,8 @@ def download_floorsheet_view(request):
         latest_date_result = FloorsheetRaw.objects.aggregate(max_date=Max('calculation_date'))
         if latest_date_result['max_date']:
             query_date = latest_date_result['max_date']
-
     if query_date:
         base_query = base_query.filter(calculation_date=query_date)
-
-    # --- Apply Other Filters ---
     if contract_no:
         base_query = base_query.filter(contract_no=contract_no)
     if stock_symbol:
@@ -1097,56 +1092,38 @@ def download_floorsheet_view(request):
         base_query = base_query.filter(buyer=buyer)
     if seller:
         base_query = base_query.filter(seller=seller)
-
     floorsheet_data = base_query.order_by('-id').values_list(
         'calculation_date', 'contract_no', 'stock_symbol', 'buyer', 
         'seller', 'quantity', 'rate', 'amount', 'sector'
     )
-
     if not floorsheet_data.exists():
         return HttpResponse("No floorsheet data to download for that query.", status=404)
-
     response = HttpResponse(content_type='text/csv')
     download_name = f"floorsheet_{query_date or 'all_dates'}.csv"
     response['Content-Disposition'] = f'attachment; filename="{download_name}"'
-
     writer = csv.writer(response)
     writer.writerow([
         'Date', 'Contract No', 'Symbol', 'Buyer', 
         'Seller', 'Quantity', 'Rate', 'Amount', 'Sector'
     ])
-
     for row in floorsheet_data:
         writer.writerow(row)
-
     return response
 
 
 def dividend_history_view(request):
-    title = "Dividend History"
-
-    # --- Get filter parameters ---
+    # (This view is unchanged)
+    title = "Dividend & Right History"
     symbol = request.GET.get('symbol', '').strip().upper()
     fiscal_year = request.GET.get('fiscal_year', '').strip()
-    
-    # --- Get pagination parameters ---
     page = request.GET.get('page', 1)
     per_page_str = request.GET.get('per_page', '20')
-
-    # --- Base query ---
     base_query = DividendHistory.objects.all()
-
-    # --- 1. Apply Filters ---
     if symbol:
         base_query = base_query.filter(symbol=symbol)
     if fiscal_year:
         base_query = base_query.filter(fiscal_year=fiscal_year)
-
-    # --- 2. Apply Sorting ---
-    # The default ordering is set in the model's Meta class
-    base_query = base_query.order_by('-announcement_date', 'symbol')
-
-    # --- 3. Pagination ---
+    base_query = base_query.order_by(F('book_closure_date').desc(nulls_last=True), '-fiscal_year')
     if per_page_str == 'All':
         paginator = None
         page_obj = base_query
@@ -1158,26 +1135,19 @@ def dividend_history_view(request):
             paginator = Paginator(base_query, 20, allow_empty_first_page=True)
             page_obj = paginator.get_page(1)
             per_page_str = '20'
-
-    # --- Get distinct values for filter dropdowns ---
     filter_options = {
         'symbols': list(DividendHistory.objects.values_list('symbol', flat=True)
                         .distinct().order_by('symbol')),
         'fiscal_years': list(DividendHistory.objects.values_list('fiscal_year', flat=True)
                              .distinct().order_by('-fiscal_year'))
     }
-
     context = {
         'title': title,
         'dividend_data': page_obj,
-
-        # Pagination context
         'page_obj': page_obj if paginator else None,
         'paginator': paginator,
         'per_page': per_page_str,
         'page': page,
-
-        # Filter values
         'symbol': symbol,
         'fiscal_year': fiscal_year,
         'filter_options': filter_options,
@@ -1186,131 +1156,115 @@ def dividend_history_view(request):
 
 
 def download_dividend_history_view(request):
-    # --- Get all the same filter parameters ---
+    # (This view is unchanged)
     symbol = request.GET.get('symbol', '').strip().upper()
     fiscal_year = request.GET.get('fiscal_year', '').strip()
-
     base_query = DividendHistory.objects.all()
-
-    # --- Apply Filters ---
     if symbol:
         base_query = base_query.filter(symbol=symbol)
     if fiscal_year:
         base_query = base_query.filter(fiscal_year=fiscal_year)
-
-    # --- Get data ---
-    dividend_data = base_query.order_by('-announcement_date', 'symbol').values_list(
+    dividend_data = base_query.order_by(
+        F('book_closure_date').desc(nulls_last=True), '-fiscal_year'
+    ).values_list(
         'fiscal_year', 'symbol', 'company_name',
-        'bonus_percent', 'cash_percent', 'tax_percent', 'total_percent',
+        'bonus_percent', 'cash_percent', 
+        'right_percent', 
+        'tax_percent', 'total_percent',
         'announcement_date', 'book_closure_date', 'book_closure_status',
         'distribution_date', 'bonus_listing_date'
     )
-
     if not dividend_data.exists():
-        return HttpResponse("No dividend history to download for that query.", status=404)
-
+        return HttpResponse("No dividend history to download for that query.", status=44)
     response = HttpResponse(content_type='text/csv')
     download_name = f"dividend_history.csv"
     response['Content-Disposition'] = f'attachment; filename="{download_name}"'
-
     writer = csv.writer(response)
-    # Write header
     writer.writerow([
         'Fiscal Year', 'Symbol', 'Company Name',
-        'Bonus %', 'Cash %', 'Tax %', 'Total %',
+        'Bonus %', 'Cash %', 
+        'Right %', 
+        'Tax %', 'Total %',
         'Announcement Date', 'Book Closure Date', 'BC Status',
         'Distribution Date', 'Bonus Listing Date'
     ])
-
-    # Write data rows
     for row in dividend_data:
         writer.writerow(row)
-
     return response
 
 
 def download_dividend_sample_view(request):
-    """
-    Generates and serves a sample CSV file for dividend history uploads.
-    """
+    # (This view is unchanged)
     response = HttpResponse(content_type='text/csv')
     response['Content-Disposition'] = 'attachment; filename="sample_dividend_history.csv"'
-
     writer = csv.writer(response)
-    
-    # Write Header
     writer.writerow([
-        'Fiscal Year', 'Symbol', 'Bonus (%)', 'Cash (%)', 'Tax (%)', 
+        'Fiscal Year', 'Symbol', 'Bonus (%)', 'Cash (%)', 
+        'Right (%)', 
+        'Tax (%)', 
         'Total (%)', 'Announcement Date', 'Book Closure Date', 
         'Book Closure Status', 'Distribution Date', 'Bonus Listing Date'
     ])
-    
-    # Write Sample Rows
     writer.writerow([
-        '2079/80', 'NIFRA', '5', '0', '0', '5', '2024-09-15', '2024-10-01', 'Posted', '2024-11-10', '2024-12-05'
+        '2079/80', 'NIFRA', '5', '0', 
+        '0', 
+        '0', '5', '2024-09-15', '2024-10-01', 'Posted', '2024-11-10', '2024-12-05'
     ])
     writer.writerow([
-        '2079/80', 'NABIL', '11', '22.5', '1.18', '33.5', '2024-08-20', '2024-09-05', 'Posted', '2024-10-15', '2024-11-20'
+        '2079/80', 'NABIL', '11', '22.5', 
+        '0', 
+        '1.18', '33.5', '2024-08-20', '2024-09-05', 'Posted', '2024-10-15', '2024-11-20'
     ])
     writer.writerow([
-        '2078/79', 'HDL', '20', '5', '1.32', '25', '2023-11-01', '2023-11-20', 'Posted', '', ''
+        '2078/79', 'HDL', '20', '5', 
+        '10', 
+        '1.32', '25', '2023-11-01', '2023-11-20', 'Posted', '', ''
     ])
     writer.writerow([
-        '2078/79', 'CIT', '10', '1.5', '0', '11.5', '2023-10-05', '', 'Not Posted', '', ''
+        '2078/79', 'CIT', '10', '1.5', 
+        '0', 
+        '0', '11.5', '2023-10-05', '', 'Not Posted', '', ''
     ])
-
     return response
 
 
 @require_POST
 def edit_dividend_view(request, pk):
-    """
-    Handles editing a single dividend history entry via a modal form.
-    """
+    # (This view is unchanged)
     try:
         dividend = DividendHistory.objects.get(pk=pk)
     except DividendHistory.DoesNotExist:
         messages.error(request, "Dividend entry not found.")
         return redirect('nepse_data:dividend_history')
 
-    # Get data from the POST request
     dividend.fiscal_year = request.POST.get('fiscal_year')
     dividend.symbol = request.POST.get('symbol', '').upper()
     dividend.company_name = request.POST.get('company_name')
-    
     dividend.bonus_percent = clean_decimal(request.POST.get('bonus_percent'))
     dividend.cash_percent = clean_decimal(request.POST.get('cash_percent'))
+    dividend.right_percent = clean_decimal(request.POST.get('right_percent'))
     dividend.tax_percent = clean_decimal(request.POST.get('tax_percent'))
     dividend.total_percent = clean_decimal(request.POST.get('total_percent'))
-    
-    # Use clean_date for all date fields
     announcement_date = clean_date(request.POST.get('announcement_date'))
     book_closure_date = clean_date(request.POST.get('book_closure_date'))
     distribution_date = clean_date(request.POST.get('distribution_date'))
     bonus_listing_date = clean_date(request.POST.get('bonus_listing_date'))
-
     dividend.announcement_date = announcement_date if announcement_date else None
     dividend.book_closure_date = book_closure_date if book_closure_date else None
     dividend.distribution_date = distribution_date if distribution_date else None
     dividend.bonus_listing_date = bonus_listing_date if bonus_listing_date else None
-    
     dividend.book_closure_status = request.POST.get('book_closure_status')
-
     try:
         dividend.save()
         messages.success(request, f"Successfully updated dividend for {dividend.symbol} ({dividend.fiscal_year}).")
     except Exception as e:
         messages.error(request, f"Error updating dividend: {e}")
-
-    # Redirect back to the same page (including filters)
     return redirect(request.META.get('HTTP_REFERER', 'nepse_data:dividend_history'))
 
 
 @require_POST
 def delete_dividend_view(request, pk):
-    """
-    Handles deleting a single dividend history entry.
-    """
+    # (This view is unchanged)
     try:
         dividend = DividendHistory.objects.get(pk=pk)
         symbol = dividend.symbol
@@ -1321,59 +1275,90 @@ def delete_dividend_view(request, pk):
         messages.error(request, "Dividend entry not found.")
     except Exception as e:
         messages.error(request, f"Error deleting dividend: {e}")
-        
     return redirect(request.META.get('HTTP_REFERER', 'nepse_data:dividend_history'))
 
 
 @require_POST
 def delete_all_dividends_view(request):
-    """
-    Handles deleting ALL dividend history entries.
-    """
+    # (This view is unchanged)
     try:
         count, _ = DividendHistory.objects.all().delete()
         messages.success(request, f"Successfully deleted all {count} dividend history records.")
     except Exception as e:
         messages.error(request, f"An error occurred while deleting all records: {e}")
-        
     return redirect('nepse_data:data_entry')
 
 
 @require_POST
 def add_dividend_view(request):
+    # --- THIS IS THE MODIFIED add_dividend_view (STEP 3c) ---
     """
     Handles adding OR UPDATING a new single dividend entry via a modal form.
-    This now uses update_or_create to match the bulk upload logic.
+    This now validates/creates the FiscalYear entry.
     """
     try:
         # Get the unique keys
         symbol = request.POST.get('symbol', '').upper()
         fiscal_year = request.POST.get('fiscal_year')
+        book_closure_date = clean_date(request.POST.get('book_closure_date'))
 
         if not symbol or not fiscal_year:
             messages.error(request, "Symbol and Fiscal Year are required.")
             return redirect('nepse_data:data_entry')
+
+        # --- NEW: Find or create the FiscalYear object ---
+        try:
+            if not re.match(r'^\d{4}/\d{2}$', fiscal_year):
+                raise ValueError("Invalid FY format. Expected '2079/80'.")
+                
+            bs_start_year = int(fiscal_year.split('/')[0])
+            bs_end_year = bs_start_year + 1
+            
+            ad_start_date = bs_to_ad(bs_start_year, 4, 1) # Shrawan 1
+            bs_end_day = NEPALI_CALENDAR_DATA[bs_end_year][2] # Ashadh (index 2)
+            ad_end_date = bs_to_ad(bs_end_year, 3, bs_end_day) # Ashadh end
+            total_days = (ad_end_date - ad_start_date).days + 1
+            
+            defaults = {
+                'bs_start_year': bs_start_year,
+                'bs_end_year': bs_end_year,
+                'bs_end_day': bs_end_day,
+                'ad_start_date': ad_start_date,
+                'ad_end_date': ad_end_date,
+                'total_days': total_days,
+            }
+            
+            fy_obj, fy_created = FiscalYear.objects.get_or_create(
+                fiscal_year=fiscal_year,
+                defaults=defaults
+            )
+            if fy_created:
+                messages.info(request, f"Created new FiscalYear entry for {fiscal_year}")
+                
+        except Exception as e:
+            messages.error(request, f"Could not save. Invalid FiscalYear '{fiscal_year}'. Error: {e}")
+            return redirect('nepse_data:data_entry')
+        # --- END OF NEW FY LOGIC ---
 
         # Get all the data for the 'defaults' dictionary
         data_to_insert = {
             'company_name': request.POST.get('company_name'),
             'bonus_percent': clean_decimal(request.POST.get('bonus_percent')),
             'cash_percent': clean_decimal(request.POST.get('cash_percent')),
+            'right_percent': clean_decimal(request.POST.get('right_percent')),
             'tax_percent': clean_decimal(request.POST.get('tax_percent')),
             'total_percent': clean_decimal(request.POST.get('total_percent')),
-            
             'announcement_date': clean_date(request.POST.get('announcement_date')),
-            'book_closure_date': clean_date(request.POST.get('book_closure_date')),
             'distribution_date': clean_date(request.POST.get('distribution_date')),
             'bonus_listing_date': clean_date(request.POST.get('bonus_listing_date')),
             'book_closure_status': request.POST.get('book_closure_status'),
         }
 
-        # Use update_or_create to find a match on (symbol, fiscal_year)
-        # or create a new one.
+        # Use update_or_create to find a match on (symbol, fiscal_year, book_closure_date)
         obj, created = DividendHistory.objects.update_or_create(
             symbol=symbol,
-            fiscal_year=fiscal_year,
+            fiscal_year=fiscal_year, # This is now a validated string
+            book_closure_date=book_closure_date,
             defaults=data_to_insert
         )
 
@@ -1385,26 +1370,21 @@ def add_dividend_view(request):
     except Exception as e:
         messages.error(request, f"Error adding/updating dividend: {e}")
 
-    # Redirect back to the data entry page
     return redirect('nepse_data:data_entry')
 
+
 def search_dividends_json_view(request):
-    """
-    Returns a JSON list of dividend entries matching a search term.
-    """
+    # (This view is unchanged)
     term = request.GET.get('term', '').strip()
     if not term:
         return JsonResponse({'error': 'No search term provided'}, status=400)
 
-    # Search by symbol or fiscal year
-    # We use Concat to make searching "NIFRA 2079/80" possible
     search_results = DividendHistory.objects.annotate(
         search_field=Concat('symbol', Value(' '), 'fiscal_year')
     ).filter(
         Q(search_field__icontains=term) | Q(symbol__icontains=term)
-    ).order_by('-fiscal_year', 'symbol')[:50] # Limit to 50 results
+    ).order_by('-fiscal_year', 'symbol')[:50]
 
-    # Serialize all data needed by the edit modal
     data = [
         {
             'id': item.id,
@@ -1413,6 +1393,7 @@ def search_dividends_json_view(request):
             'company_name': item.company_name,
             'bonus_percent': item.bonus_percent,
             'cash_percent': item.cash_percent,
+            'right_percent': item.right_percent,
             'tax_percent': item.tax_percent,
             'total_percent': item.total_percent,
             'announcement_date': item.announcement_date.strftime('%Y-%m-%d') if item.announcement_date else '',
@@ -1427,19 +1408,15 @@ def search_dividends_json_view(request):
     return JsonResponse({'results': data})
 
 def company_lookup_json_view(request):
-    """
-    Looks up a company name by its symbol (script_ticker).
-    """
+    # (This view is unchanged)
     symbol = request.GET.get('symbol', '').strip().upper()
     if not symbol:
         return JsonResponse({'error': 'No symbol provided'}, status=400)
 
     try:
-        # We query the Companies model from your other app
         company = Companies.objects.get(script_ticker=symbol)
         return JsonResponse({'company_name': company.company_name})
     except Companies.DoesNotExist:
-        # If not found, return an empty string
         return JsonResponse({'company_name': ''})
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
