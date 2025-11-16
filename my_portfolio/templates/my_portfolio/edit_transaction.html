@@ -6,21 +6,27 @@
 
 {% block content %}
 <div class="row justify-content-center">
-    <div class="col-lg-8">
-        <div class="card">
+    <div class="col-lg-10 col-xl-8">
+        <div class="card shadow-sm">
             <div class="card-header">
-                <h4 class="mb-0"><i class="bi bi-pencil"></i> Edit Transaction</h4>
+                <h4 class="mb-0">
+                    <i class="bi bi-pencil"></i> Edit Transaction: 
+                    <span class="text-primary">{{ transaction.symbol.script_ticker }}</span>
+                    <small class="text-muted">({{ transaction.date|date:'Y-m-d' }})</small>
+                </h4>
             </div>
             <div class="card-body p-4">
                 <form method="POST">
                     {% csrf_token %}
+                    
+                    <h5 class="mb-3 border-bottom pb-2">Core Details</h5>
                     <div class="row mb-3">
-                        <div class="col-md-6">
+                        <div class="col-md-4">
                             <label for="date" class="form-label">Date <span class="text-danger">*</span></label>
                             <input type="date" class="form-control" id="date" name="date" 
                                    value="{{ transaction.date|date:'Y-m-d' }}" required>
                         </div>
-                        <div class="col-md-6">
+                        <div class="col-md-4">
                             <label for="symbol" class="form-label">Symbol <span class="text-danger">*</span></label>
                             <input type="text" class="form-control" id="symbol" name="symbol" 
                                    value="{{ transaction.symbol.script_ticker }}" required list="symbolList" autocomplete="off">
@@ -30,23 +36,7 @@
                                 {% endfor %}
                             </datalist>
                         </div>
-                    </div>
-
-                    <div class="row mb-3">
-                        <div class="col-md-6">
-                            <label for="script" class="form-label">Script / Company Name</label>
-                            <input type="text" class="form-control" id="script" name="script" 
-                                   value="{{ transaction.script }}" readonly>
-                        </div>
-                        <div class="col-md-6">
-                            <label for="sector" class="form-label">Sector</label>
-                            <input type="text" class="form-control" id="sector" name="sector" 
-                                   value="{{ transaction.sector }}" readonly>
-                        </div>
-                    </div>
-
-                    <div class="row mb-3">
-                        <div class="col-md-6">
+                        <div class="col-md-4">
                             <label for="transaction_type" class="form-label">Transaction Type <span class="text-danger">*</span></label>
                             <select class="form-select" id="transaction_type" name="transaction_type" required>
                                 {% for value, display in transaction.TransactionType.choices %}
@@ -54,30 +44,105 @@
                                 {% endfor %}
                             </select>
                         </div>
-                        <div class="col-md-6">
-                            <label for="kitta" class="form-label">Kitta (Shares) <span class="text-danger">*</span></label>
+                    </div>
+                    
+                    <div class="row mb-3">
+                        <div class="col-md-4">
+                            <label for="kitta" class="form-label">Kitta (Shares)</label>
                             <input type="number" class="form-control" id="kitta" name="kitta" 
-                                   value="{{ transaction.kitta }}" min="1" required>
+                                   value="{{ transaction.kitta|default:'' }}" min="0">
+                        </div>
+                        <div class="col-md-4">
+                            <label for="rate" class="form-label">Rate (Trade Rate)</label>
+                            <input type="number" class="form-control" id="rate" name="rate" 
+                                   value="{{ transaction.rate|default:'' }}" step="0.01">
+                        </div>
+                        <div class="col-md-4">
+                            <label for="broker" class="form-label">Broker Number</label>
+                            <input type="text" class="form-control" id="broker" name="broker" 
+                                   value="{{ transaction.broker|default:'' }}">
+                        </div>
+                    </div>
+
+                    <h5 class="mb-3 pt-3 border-bottom pb-2">Financial Details</h5>
+                    <div class="row mb-3">
+                        <div class="col-md-4">
+                            <label for="gross_amount" class="form-label">Gross Amount</label>
+                            <input type="number" class="form-control" id="gross_amount" name="gross_amount" 
+                                   value="{{ transaction.gross_amount|default:'' }}" step="0.01">
+                        </div>
+                        <div class="col-md-4">
+                            <label for="commission_rate" class="form-label">Comm. Rate (%)</label>
+                            <input type="number" class="form-control" id="commission_rate" name="commission_rate" 
+                                   value="{{ transaction.commission_rate|default:'' }}" step="0.0001">
+                        </div>
+                        <div class="col-md-4">
+                            <label for="commission_amount" class="form-label">Comm. Amount</label>
+                            <input type="number" class="form-control" id="commission_amount" name="commission_amount" 
+                                   value="{{ transaction.commission_amount|default:'' }}" step="0.01">
+                        </div>
+                    </div>
+                    
+                    <div class="row mb-3">
+                        <div class="col-md-4">
+                            <label for="nepse_commission" class="form-label">NEPSE Commission</label>
+                            <input type="number" class="form-control" id="nepse_commission" name="nepse_commission" 
+                                   value="{{ transaction.nepse_commission|default:'' }}" step="0.01">
+                        </div>
+                        <div class="col-md-4">
+                            <label for="sebon_regularity_fee" class="form-label">SEBON Fee</label>
+                            <input type="number" class="form-control" id="sebon_regularity_fee" name="sebon_regularity_fee" 
+                                   value="{{ transaction.sebon_regularity_fee|default:'' }}" step="0.01">
+                        </div>
+                        <div class="col-md-4">
+                            <label for="broker_commission" class="form-label">Broker Commission</label>
+                            <input type="number" class="form-control" id="broker_commission" name="broker_commission" 
+                                   value="{{ transaction.broker_commission|default:'' }}" step="0.01">
                         </div>
                     </div>
 
                     <div class="row mb-3">
-                        <div class="col-md-6">
-                            <label for="billed_amount" class="form-label">Billed Amount</label>
-                            <input type="number" class="form-control" id="billed_amount" name="billed_amount" 
-                                   value="{{ transaction.billed_amount|default:'' }}" step="0.01">
+                        <div class="col-md-4">
+                            <label for="sebo_commission" class="form-label">SEBO Comm.</label>
+                            <input type="number" class="form-control" id="sebo_commission" name="sebo_commission" 
+                                   value="{{ transaction.sebo_commission|default:'' }}" step="0.01">
                         </div>
-                        <div class="col-md-6">
-                            <label for="rate" class="form-label">Rate (Auto-calculated)</label>
-                            <input type="text" class="form-control" id="rate" name="rate" 
-                                   value="{{ transaction.rate|default:'' }}" readonly>
+                        <div class="col-md-4">
+                            <label for="cgt" class="form-label">CGT (CGH)</label>
+                            <input type="number" class="form-control" id="cgt" name="cgt" 
+                                   value="{{ transaction.cgt|default:'' }}" step="0.01">
+                        </div>
+                        <div class="col-md-4">
+                            <label for="dp_fee" class="form-label">DP Fee</label>
+                            <input type="number" class="form-control" id="dp_fee" name="dp_fee" 
+                                   value="{{ transaction.dp_fee|default:'' }}" step="0.01">
                         </div>
                     </div>
 
-                    <div class="mb-4">
-                        <label for="broker" class="form-label">Broker Number</label>
-                        <input type="text" class="form-control" id="broker" name="broker" 
-                               value="{{ transaction.broker|default:'' }}">
+                    <h5 class="mb-3 pt-3 border-bottom pb-2">Summary</h5>
+                    <div class="row mb-3">
+                        <div class="col-md-4">
+                            <label for="billed_amount" class="form-label">Billed Amount (Net)</label>
+                            <input type="number" class="form-control" id="billed_amount" name="billed_amount" 
+                                   value="{{ transaction.billed_amount|default:'' }}" step="0.01">
+                        </div>
+                        <div class="col-md-4">
+                            <label for="eff_rate" class="form-label">Effective Rate (Readonly)</label>
+                            <input type="text" class="form-control" id="eff_rate" name="eff_rate" 
+                                   value="{{ transaction.eff_rate|default:'' }}" readonly>
+                        </div>
+                    </div>
+                    <div class="row mb-4">
+                        <div class="col-md-6">
+                            <label for="script" class="form-label">Script / Company Name (Readonly)</label>
+                            <input type="text" class="form-control" id="script" name="script" 
+                                   value="{{ transaction.script }}" readonly>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="sector" class="form-label">Sector (Readonly)</label>
+                            <input type="text" class="form-control" id="sector" name="sector" 
+                                   value="{{ transaction.sector }}" readonly>
+                        </div>
                     </div>
 
                     <div class="d-grid gap-2 d-md-flex justify-content-md-end">
@@ -97,11 +162,14 @@
 
 {% block extra_js %}
 <script>
+    // This script auto-fills the Company Name and Sector when you change the Symbol
     document.getElementById('symbol').addEventListener('input', async function() {
         const symbol = this.value.trim().toUpperCase();
         
         if (symbol.length >= 2) {
             try {
+                // Note: The URL tag here is slightly different from transactions.html
+                // It's simpler because we are not using the 'django-urls' span
                 const response = await fetch(`{% url 'my_portfolio:api_company_details' 'SYMBOL' %}`.replace('SYMBOL', symbol));
                 if (response.ok) {
                     const data = await response.json();
@@ -117,19 +185,20 @@
         }
     });
 
-    function calculateRate() {
+    // This script auto-calculates the read-only 'Effective Rate'
+    function calculateEffRate() {
         const kitta = parseFloat(document.getElementById('kitta').value) || 0;
         const billedAmount = parseFloat(document.getElementById('billed_amount').value) || 0;
         
         if (kitta > 0 && billedAmount > 0) {
             const rate = (billedAmount / kitta).toFixed(2);
-            document.getElementById('rate').value = rate;
+            document.getElementById('eff_rate').value = rate;
         } else {
-            document.getElementById('rate').value = '';
+            document.getElementById('eff_rate').value = '';
         }
     }
 
-    document.getElementById('kitta').addEventListener('input', calculateRate);
-    document.getElementById('billed_amount').addEventListener('input', calculateRate);
+    document.getElementById('kitta').addEventListener('input', calculateEffRate);
+    document.getElementById('billed_amount').addEventListener('input', calculateEffRate);
 </script>
 {% endblock %}

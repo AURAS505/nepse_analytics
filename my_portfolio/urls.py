@@ -14,6 +14,7 @@ urlpatterns = [
     path('transactions/delete/<str:unique_id>/', views.transaction_delete, name='transaction_delete'),
     path('transactions/delete_all/', views.transaction_delete_all, name='transaction_delete_all'),
     path('transactions/upload/', views.transaction_upload, name='transaction_upload'),
+    path('transactions/sync_dividends/', views.sync_dividend_transactions, name='sync_dividends'),
     path('transactions/download_template/<str:file_type>/', 
          views.download_transaction_template, 
          name='download_transaction_template'),

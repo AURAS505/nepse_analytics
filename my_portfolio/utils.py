@@ -1,21 +1,40 @@
 # my_portfolio/utils.py
 from collections import defaultdict
 from decimal import Decimal, ROUND_HALF_UP
+from .models import Transaction # Import the Transaction model
 
-# This holds the logic from your Flask app's portfolio_dashboard and stock_details
-#
+# ### THIS IS THE FUNCTION THAT WAS MISSING ###
+def get_holdings_on_date(symbol_obj, target_date):
+    """
+    Calculates the total kitta held for a specific symbol *before* a target date.
+    This is used to determine holdings for dividend/right eligibility.
+    """
+    # Get all transactions for this symbol *before* the book closure date
+    txns = Transaction.objects.filter(
+        symbol=symbol_obj, 
+        date__lt=target_date
+    ).order_by('date', 'created_at')
+
+    current_kitta = 0
+    for txn in txns:
+        kitta = int(txn.kitta or 0)
+        
+        # Add for purchases
+        if txn.transaction_type in ('BUY', 'BONUS', 'IPO', 'RIGHT', 'Balance b/d', 'CONVERSION(+)', 'SUSPENSE(+)'):
+            current_kitta += kitta
+        # Subtract for sales
+        elif txn.transaction_type in ('SALE', 'CONVERSION(-)', 'SUSPENSE(-)'):
+            current_kitta -= kitta
+        # CASH type does not affect kitta
+            
+    return current_kitta
+# ### END NEW FUNCTION ###
+
 
 def calculate_pma_details(transactions, latest_price_info):
     """
     Calculates the detailed PMA (Perpetual Moving Average) ledger and
     summary for a single stock's transactions.
-    
-    Args:
-        transactions (list): A list of transaction dicts for ONE symbol.
-        latest_price_info (dict): A dict with 'close_price' and 'business_date'.
-    
-    Returns:
-        tuple: (detailed_calculations, summary_data)
     """
     
     detailed_calculations = []
@@ -36,23 +55,16 @@ def calculate_pma_details(transactions, latest_price_info):
         profit = Decimal('0.0')
 
         txn_type = txn['transaction_type']
-        kitta = int(txn['kitta'])
-        billed_amount_dec = txn.get('billed_amount') or Decimal('0.0')
-
-        # Ensure rate is a Decimal
-        txn_rate = txn.get('rate')
-        if isinstance(txn_rate, Decimal):
-            txn_rate = txn_rate.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-        elif txn_rate is not None:
-            txn_rate = Decimal(txn_rate).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-        elif kitta > 0 and billed_amount_dec > 0:
-            txn_rate = (billed_amount_dec / Decimal(kitta)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-        else:
-            txn_rate = Decimal('0.0')
+        # Handle CASH type where kitta is None
+        kitta = int(txn.get('kitta') or 0) 
+        # billed_amount is the net cost/proceeds
+        billed_amount_dec = txn.get('billed_amount') or Decimal('0.0') 
+        # eff_rate is the (billed_amount / kitta)
+        txn_eff_rate = txn.get('eff_rate') or Decimal('0.0') 
 
         if txn_type == 'Balance b/d' and is_first_row:
-            op_qty, op_amount, op_rate = kitta, billed_amount_dec, txn_rate
-            p_qty, p_rate, p_amount = kitta, txn_rate, billed_amount_dec
+            op_qty, op_amount, op_rate = kitta, billed_amount_dec, txn_eff_rate
+            p_qty, p_rate, p_amount = kitta, txn_eff_rate, billed_amount_dec
             current_kitta, current_total_cost = kitta, billed_amount_dec
             total_purchase_amount += billed_amount_dec
             total_purchase_kitta += kitta
@@ -61,16 +73,18 @@ def calculate_pma_details(transactions, latest_price_info):
             op_rate = (op_amount / Decimal(op_qty)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP) if op_qty > 0 else Decimal('0.0')
 
             if txn_type in ('BUY', 'BONUS', 'IPO', 'RIGHT', 'CONVERSION(+)', 'SUSPENSE(+)'):
-                p_qty, p_rate, p_amount = kitta, txn_rate, billed_amount_dec
+                p_qty, p_rate, p_amount = kitta, txn_eff_rate, billed_amount_dec
                 current_kitta += kitta
-                current_total_cost += billed_amount_dec
+                current_total_cost += billed_amount_dec # Cost basis is the net billed amount
                 total_purchase_kitta += kitta
                 if txn_type != 'BONUS':
                     total_purchase_amount += billed_amount_dec
+            
             elif txn_type in ('SALE', 'CONVERSION(-)', 'SUSPENSE(-)'):
-                s_qty, s_rate, s_amount = kitta, txn_rate, billed_amount_dec
-                current_avg_rate = op_rate
+                s_qty, s_rate, s_amount = kitta, txn_eff_rate, billed_amount_dec
+                current_avg_rate = op_rate # This is the WACC
                 sell_kitta = min(kitta, current_kitta)
+                
                 if sell_kitta <= 0:
                     profit, consumption = Decimal('0.0'), Decimal('0.0')
                 else:
@@ -82,14 +96,22 @@ def calculate_pma_details(transactions, latest_price_info):
                 current_kitta -= sell_kitta
                 total_sales_amount += billed_amount_dec
                 total_sales_kitta += kitta
+            
+            elif txn_type == 'CASH':
+                # Cash Dividend: Add to realized P/L, no effect on kitta or cost
+                profit = billed_amount_dec
+                total_realized_pl += profit
+                # Set 'p_amount' so it appears in the ledger
+                p_amount = billed_amount_dec 
+                
 
         cl_qty = current_kitta
         cl_amount = current_total_cost
         cl_rate = (cl_amount / Decimal(cl_qty)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP) if cl_qty > 0 else Decimal('0.0')
         if cl_qty <= 0: cl_amount, cl_qty = Decimal('0.0'), 0
         
-        # --- NEW: Define row type for template ---
-        is_buy_type = txn_type in ('BUY', 'BONUS', 'IPO', 'RIGHT', 'CONVERSION(+)', 'Balance b/d', 'SUSPENSE(+)')
+        # --- Define row type for template ---
+        is_buy_type = txn_type in ('BUY', 'BONUS', 'IPO', 'RIGHT', 'CONVERSION(+)', 'Balance b/d', 'SUSPENSE(+)', 'CASH')
         is_sale_type = txn_type in ('SALE', 'CONVERSION(-)', 'SUSPENSE(-)')
         # --- END NEW ---
 
@@ -100,7 +122,6 @@ def calculate_pma_details(transactions, latest_price_info):
             'profit': profit, 'cl_qty': cl_qty, 'cl_rate': cl_rate, 'cl_amount': cl_amount,
             'op_qty': op_qty, 'op_rate': op_rate, 'op_amount': op_amount,
             'consumption': consumption,
-            # --- NEW: Add keys for the template ---
             'is_buy': is_buy_type,
             'is_sale': is_sale_type,
         })
@@ -114,7 +135,7 @@ def calculate_pma_details(transactions, latest_price_info):
     paid_purchase_kitta = 0
     for txn in transactions:
         if txn['transaction_type'] in ('Balance b/d', 'BUY', 'IPO', 'RIGHT', 'CONVERSION(+)') and (txn.get('billed_amount') or 0) > 0:
-            paid_purchase_kitta += int(txn['kitta'])
+            paid_purchase_kitta += int(txn.get('kitta') or 0)
     
     total_purchase_rate = (total_purchase_amount / Decimal(paid_purchase_kitta)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP) if paid_purchase_kitta > 0 else Decimal('0.0')
     total_sales_rate = (total_sales_amount / Decimal(total_sales_kitta)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP) if total_sales_kitta > 0 else Decimal('0.0')
@@ -137,50 +158,44 @@ def calculate_pma_details(transactions, latest_price_info):
     return detailed_calculations, summary_data
 
 
+# ### MODIFIED FUNCTION: calculate_overall_portfolio ###
 def calculate_overall_portfolio(all_transactions, latest_prices):
     """
     Calculates the high-level stats for the entire portfolio.
-    
-    Args:
-        all_transactions (list): A list of ALL transaction dicts.
-        latest_prices (dict): A dict mapping symbols to their latest price info.
-    
-    Returns:
-        tuple: (overall_stats, holdings_summary_list)
     """
     
     holdings_summary_list = []
     overall_stats = {
         'book_value': Decimal('0.0'),
         'market_value': Decimal('0.0'),
-        'realized_pl': Decimal('0.0')
+        'realized_pl': Decimal('0.0'),
+        'cash_dividend': Decimal('0.0') # <-- ADD THIS
     }
     
     # Group transactions by symbol
     grouped_txns = defaultdict(list)
     for txn in all_transactions:
-        # --- THIS IS THE FIX ---
-        # Changed 'symbol_id' to 'symbol' to match your database query
-        grouped_txns[txn['symbol']].append(txn)
-        # --- END OF FIX ---
+        # This uses the 'symbol_id' key from dictfetchall
+        grouped_txns[txn['symbol_id']].append(txn)
 
     # Iterate through each symbol to get its final state
-    for symbol, txns in grouped_txns.items():
+    for symbol_id, txns in grouped_txns.items():
         current_kitta = 0
         current_total_cost = Decimal('0.0')
         total_realized_pl = Decimal('0.0')
+        total_cash_dividend = Decimal('0.0') # <-- ADD THIS
         script_name = txns[0]['script']
         sector_name = txns[0]['sector']
 
         # Run PMA logic for this symbol
         for txn in txns:
             txn_type = txn['transaction_type']
-            kitta = int(txn['kitta'])
-            billed_amount_dec = txn.get('billed_amount') or Decimal('0.0')
+            kitta = int(txn.get('kitta') or 0)
+            billed_amount_dec = txn.get('billed_amount') or Decimal('0.0') 
             
             if txn_type in ('Balance b/d', 'BUY', 'IPO', 'RIGHT', 'CONVERSION(+)', 'BONUS', 'SUSPENSE(+)'):
                 current_kitta += kitta
-                current_total_cost += billed_amount_dec
+                current_total_cost += billed_amount_dec 
             
             elif txn_type in ('SALE', 'CONVERSION(-)', 'SUSPENSE(-)'):
                 current_avg_rate = Decimal('0.0')
@@ -190,7 +205,7 @@ def calculate_overall_portfolio(all_transactions, latest_prices):
                 sell_kitta = min(kitta, current_kitta)
                 if sell_kitta <= 0:
                     cost_of_goods_sold = Decimal('0.0')
-                    profit_loss = billed_amount_dec
+                    profit_loss = billed_amount_dec 
                 else:
                     cost_of_goods_sold = (Decimal(sell_kitta) * current_avg_rate).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
                     profit_loss = (billed_amount_dec - cost_of_goods_sold).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
@@ -198,21 +213,27 @@ def calculate_overall_portfolio(all_transactions, latest_prices):
                 total_realized_pl += profit_loss
                 current_total_cost -= cost_of_goods_sold
                 current_kitta -= sell_kitta
+            
+            elif txn_type == 'CASH':
+                # This is the change:
+                total_realized_pl += billed_amount_dec  # Add to P/L
+                total_cash_dividend += billed_amount_dec # Also track separately
         
         # Add to OVERALL stats
         overall_stats['realized_pl'] += total_realized_pl
+        overall_stats['cash_dividend'] += total_cash_dividend # <-- ADD THIS
         
         # If we still hold this stock, add to book/market value
         if current_kitta > 0:
             bep_rate = (current_total_cost / Decimal(current_kitta)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             book_value = current_total_cost.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             
-            ltp = latest_prices.get(symbol, {}).get('close_price', Decimal('0.0'))
+            ltp = latest_prices.get(symbol_id, {}).get('close_price', Decimal('0.0'))
             market_value = (ltp * Decimal(current_kitta)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             unrealized_pl = (market_value - book_value)
             
             holdings_summary_list.append({
-                'symbol': symbol,
+                'symbol': symbol_id, 
                 'script': script_name,
                 'sector': sector_name,
                 'closing_kitta': current_kitta,
@@ -220,7 +241,8 @@ def calculate_overall_portfolio(all_transactions, latest_prices):
                 'bep': bep_rate,
                 'ltp': ltp,
                 'realized_pl': total_realized_pl,
-                'unrealized_pl': unrealized_pl
+                'unrealized_pl': unrealized_pl,
+                'cash_dividend': total_cash_dividend # <-- ADD THIS
             })
 
             overall_stats['book_value'] += book_value
