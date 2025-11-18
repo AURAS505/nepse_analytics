@@ -601,7 +601,16 @@ def transaction_upload(request):
         if value_str: return Decimal(str(value_str).strip())
         return None
     def to_int_or_none(value_str):
-        if value_str: return int(str(value_str).strip())
+        if value_str:
+            try:
+                # 1. Convert to Decimal safely
+                dec_val = Decimal(str(value_str).strip())
+                # 2. Convert to integer. Use quantize/round if intermediate decimals exist.
+                # For Kitta, we assume it's a whole number.
+                return int(dec_val.quantize(Decimal('1'), rounding=ROUND_HALF_UP))
+            except InvalidOperation:
+                # If it's a non-numeric string, int() will fail later, so return None
+                return None
         return None
 
     try:
