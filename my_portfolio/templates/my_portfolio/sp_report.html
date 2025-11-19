@@ -1,0 +1,269 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}S/P Report (Opportunity Analysis){% endblock %}
+{% block title_header %}<i class="bi bi-eyeglasses"></i> S/P Report (Buy/Sell Opportunities){% endblock %}
+
+{% block content %}
+<div class="card shadow-sm mb-4">
+    <div class="card-header">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <a href="{% url 'my_portfolio:portfolio_home' %}" class="btn btn-sm btn-outline-secondary">
+                <i class="bi bi-arrow-left"></i> Back to Dashboard
+            </a>
+        </div>
+        <form method="GET" class="row g-3 align-items-end">
+            <div class="col-md-3">
+                <label for="start_date" class="form-label fw-bold">Start Date</label>
+                <input type="date" class="form-control" id="start_date" name="start_date" value="{{ start_date|date:'Y-m-d' }}">
+            </div>
+            <div class="col-md-3">
+                <label for="end_date" class="form-label fw-bold">End Date</label>
+                <input type="date" class="form-control" id="end_date" name="end_date" value="{{ end_date|date:'Y-m-d' }}">
+            </div>
+            <div class="col-md-3">
+                <label for="sector" class="form-label fw-bold">Sector</label>
+                <select class="form-select" id="sector" name="sector">
+                    <option value="All">All Sectors</option>
+                    {% for s in available_sectors %}
+                        <option value="{{ s }}" {% if selected_sector == s %}selected{% endif %}>{{ s }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <button type="submit" class="btn btn-primary w-100"><i class="bi bi-search"></i> Run Analysis</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="row g-4">
+    <div class="col-xl-6">
+        <div class="card shadow-sm h-100 border-0">
+            <div class="card-header bg-success-subtle text-success fw-bold">
+                <i class="bi bi-cart-plus-fill me-2"></i> BUY SECTION (Entry Analysis)
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover table-sm mb-0" id="buyTable" style="font-size: 0.85rem;">
+                        <thead class="table-light text-center align-middle">
+                            <tr>
+                                <th class="text-start">Symbol</th>
+                                <th>P. Kitta</th>
+                                <th class="text-end" style="cursor: pointer;" onclick="sortTable('buyTable', 2, 'number')">T. Purchase &#x21C5;</th>
+                                <th>Avg. Rate</th>
+                                <th>LTP <br><small class="text-muted fw-normal">({{ ltp_date }})</small></th>
+                                <th class="text-end" style="cursor: pointer;" onclick="sortTable('buyTable', 5, 'number')">OPP COST &#x21C5;<br><small class="text-muted">(Unrealized)</small></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr class="table-secondary fw-bold border-bottom border-2">
+                                <td class="text-start align-middle fs-6">TOTAL</td>
+                                <td class="text-center align-middle fs-5">{{ buy_totals.kitta|intcomma }}</td>
+                                <td class="text-end align-middle fs-5">{{ buy_totals.amount|floatformat:2|intcomma }}</td>
+                                <td></td>
+                                <td></td>
+                                <td class="text-end align-middle fs-5 {% if buy_totals.opp_cost >= 0 %}text-success{% else %}text-danger{% endif %}">
+                                    {% if buy_totals.opp_cost < 0 %}
+                                        ({{ buy_totals.opp_cost|stringformat:"f"|cut:"-"|floatformat:2|intcomma }})
+                                    {% else %}
+                                        {{ buy_totals.opp_cost|floatformat:2|intcomma }}
+                                    {% endif %}
+                                </td>
+                            </tr>
+
+                            {% for row in buy_data %}
+                            <tr>
+                                <td class="text-start fw-bold">{{ row.symbol }}</td>
+                                <td class="text-center">{{ row.p_kitta|intcomma }}</td>
+                                <td class="text-end">{{ row.t_purchase|floatformat:2|intcomma }}</td>
+                                <td class="text-center">{{ row.rate|floatformat:2|intcomma }}</td>
+                                <td class="text-center">
+                                    {{ row.ltp|floatformat:2|intcomma }}
+                                    {% if row.adj_ltp != row.ltp %}
+                                        <div class="small text-primary fw-bold" style="font-size: 0.75rem;">
+                                            (Adj: {{ row.adj_ltp|floatformat:0|intcomma }})
+                                        </div>
+                                    {% endif %}
+                                </td>
+                                <td class="text-end fw-bold {% if row.opp_cost >= 0 %}text-success{% else %}text-danger{% endif %}">
+                                    {% if row.opp_cost < 0 %}
+                                        ({{ row.opp_cost|stringformat:"f"|cut:"-"|floatformat:2|intcomma }})
+                                    {% else %}
+                                        {{ row.opp_cost|floatformat:2|intcomma }}
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="6" class="text-center text-muted py-4">No Buy transactions in this range.</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-xl-6">
+        <div class="card shadow-sm h-100 border-0">
+            <div class="card-header bg-danger-subtle text-danger fw-bold">
+                <i class="bi bi-cart-dash-fill me-2"></i> SALE SECTION (Exit Analysis)
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover table-sm mb-0" id="sellTable" style="font-size: 0.85rem;">
+                        <thead class="table-light text-center align-middle">
+                            <tr>
+                                <th class="text-start">Symbol</th>
+                                <th>S. Kitta</th>
+                                <th class="text-end" style="cursor: pointer;" onclick="sortTable('sellTable', 2, 'number')">Total Sales &#x21C5;</th>
+                                <th>Avg. Rate</th>
+                                <th class="text-end" style="cursor: pointer;" onclick="sortTable('sellTable', 4, 'number')">Profit &#x21C5;<br><small class="text-muted">(Realized)</small></th>
+                                <th>LTP <br><small class="text-muted fw-normal">({{ ltp_date }})</small></th>
+                                <th class="text-end" style="cursor: pointer;" onclick="sortTable('sellTable', 6, 'number')">OPP COST &#x21C5;<br><small class="text-muted">(Missed Gain)</small></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr class="table-secondary fw-bold border-bottom border-2">
+                                <td class="text-start align-middle fs-6">TOTAL</td>
+                                <td class="text-center align-middle fs-5">{{ sell_totals.kitta|intcomma }}</td>
+                                <td class="text-end align-middle fs-5">{{ sell_totals.amount|floatformat:2|intcomma }}</td>
+                                <td></td>
+                                <td class="text-end align-middle fs-5 {% if sell_totals.profit >= 0 %}text-success{% else %}text-danger{% endif %}">
+                                    {% if sell_totals.profit < 0 %}
+                                        ({{ sell_totals.profit|stringformat:"f"|cut:"-"|floatformat:2|intcomma }})
+                                    {% else %}
+                                        {{ sell_totals.profit|floatformat:2|intcomma }}
+                                    {% endif %}
+                                </td>
+                                <td></td>
+                                <td class="text-end align-middle fs-5 {% if sell_totals.opp_cost > 0 %}text-danger{% else %}text-success{% endif %}">
+                                    {% if sell_totals.opp_cost > 0 %}
+                                        ({{ sell_totals.opp_cost|floatformat:2|intcomma }})
+                                    {% else %}
+                                        {{ sell_totals.opp_cost|stringformat:"f"|cut:"-"|floatformat:2|intcomma }}
+                                    {% endif %}
+                                </td>
+                            </tr>
+
+                            {% for row in sell_data %}
+                            <tr>
+                                <td class="text-start fw-bold">{{ row.symbol }}</td>
+                                <td class="text-center">{{ row.s_kitta|intcomma }}</td>
+                                <td class="text-end">{{ row.total_sales|floatformat:2|intcomma }}</td>
+                                <td class="text-center">{{ row.rate|floatformat:2|intcomma }}</td>
+                                
+                                <td class="text-end {% if row.profit >= 0 %}text-success{% else %}text-danger{% endif %}">
+                                    {% if row.profit < 0 %}
+                                        ({{ row.profit|stringformat:"f"|cut:"-"|floatformat:2|intcomma }})
+                                    {% else %}
+                                        {{ row.profit|floatformat:2|intcomma }}
+                                    {% endif %}
+                                </td>
+                                
+                                <td class="text-center">
+                                    {{ row.ltp|floatformat:2|intcomma }}
+                                    {% if row.adj_ltp != row.ltp %}
+                                        <div class="small text-primary fw-bold" style="font-size: 0.75rem;">
+                                            (Adj: {{ row.adj_ltp|floatformat:0|intcomma }})
+                                        </div>
+                                    {% endif %}
+                                </td>
+                                
+                                <td class="text-end fw-bold {% if row.opp_cost > 0 %}text-danger{% else %}text-success{% endif %}">
+                                    {% if row.opp_cost > 0 %}
+                                        ({{ row.opp_cost|floatformat:2|intcomma }})
+                                    {% else %}
+                                        {{ row.opp_cost|stringformat:"f"|cut:"-"|floatformat:2|intcomma }}
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="7" class="text-center text-muted py-4">No Sell transactions in this range.</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Sort Logic (Remains the same)
+let sortDirections = {};
+
+function sortTable(tableId, colIndex, type) {
+  const table = document.getElementById(tableId);
+  const tbody = table.getElementsByTagName('tbody')[0];
+  
+  const allRows = Array.from(tbody.getElementsByTagName('tr'));
+  const totalRow = allRows[0]; 
+  const dataRows = allRows.slice(1); 
+  
+  const directionKey = `${tableId}-${colIndex}`;
+  const currentDirection = sortDirections[directionKey] || 'desc';
+  const newDirection = currentDirection === 'asc' ? 'desc' : 'asc';
+  
+  const parseNumber = (s) => {
+    // Clean the string to handle (Adj: XXX) and parentheses
+    // If there is an Adj price, it usually comes after the main price on a new line or div
+    // But textContent grabs everything. "1150 (Adj: 1332)"
+    // We usually want to sort by the main number (LTP) or the raw financial value
+    
+    // Remove "Adj: ..." part if present for sorting
+    let clean = String(s).split('(Adj:')[0];
+    clean = clean.replace(/,/g, '').replace('Rs. ', '').trim();
+    
+    let isNegative = false;
+    if (clean.startsWith('(') && clean.endsWith(')')) {
+        isNegative = true;
+        clean = clean.slice(1, -1);
+    }
+    
+    let val = parseFloat(clean) || 0;
+    if (isNegative) val = -val;
+    return val;
+  };
+  
+  const sortComparer = (a, b) => {
+    let valA = a.getElementsByTagName('td')[colIndex].textContent;
+    let valB = b.getElementsByTagName('td')[colIndex].textContent;
+    
+    let compareA, compareB;
+    
+    if (type === 'number') {
+      compareA = parseNumber(valA);
+      compareB = parseNumber(valB);
+    } else {
+      compareA = valA.trim().toLowerCase();
+      compareB = valB.trim().toLowerCase();
+    }
+
+    if (compareA < compareB) {
+      return newDirection === 'asc' ? -1 : 1;
+    }
+    if (compareA > compareB) {
+      return newDirection === 'asc' ? 1 : -1;
+    }
+    return 0;
+  };
+  
+  dataRows.sort(sortComparer);
+  
+  tbody.innerHTML = "";
+  tbody.appendChild(totalRow);
+  dataRows.forEach(row => {
+    tbody.appendChild(row);
+  });
+  
+  sortDirections[directionKey] = newDirection;
+}
+</script>
+{% endblock %}

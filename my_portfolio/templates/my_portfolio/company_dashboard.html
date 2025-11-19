@@ -9,13 +9,18 @@
   <div class="card-body bg-light-subtle">
     <form id="stockLookupForm" method="GET" action="{% url 'my_portfolio:company_dashboard' %}" class="d-flex flex-wrap justify-content-between align-items-center gap-3">
       <div>
-        <h5 class="fw-semibold text-primary mb-1">Company Report</h5>
+        <div class="d-flex align-items-center gap-2 mb-1">
+            <a href="{% url 'my_portfolio:portfolio_home' %}" class="btn btn-sm btn-outline-secondary" title="Back to Dashboard">
+                <i class="bi bi-arrow-left"></i>
+            </a>
+            <h5 class="fw-semibold text-primary mb-0">Company Report</h5>
+        </div>
         {% if company %}
-          <div class="text-muted small">
+          <div class="text-muted small ms-1">
             <strong>{{ company.symbol }}</strong> — {{ company.script }} <span class="badge bg-info-subtle text-dark ms-2">{{ company.sector }}</span>
           </div>
         {% else %}
-          <small class="text-muted">Select a symbol to view report</small>
+          <small class="text-muted ms-1">Select a symbol to view report</small>
         {% endif %}
       </div>
 
@@ -43,7 +48,6 @@
 </div>
 
 <div class="row g-4">
-  
   <div class="col-lg-9">
     {% if summary and company %}
     <div class="card shadow-sm border-0 h-100">
@@ -52,7 +56,6 @@
       </div>
       
       <div class="table-responsive" style="max-height: 750px; overflow-y: auto;">
-        {# --- FIX 1: Removed 'table-striped' so colors show up clearly --- #}
         <table class="table table-hover table-bordered table-sm mb-0 align-middle" style="font-size: 0.95rem;">
           
           <thead class="table-primary text-center" style="position: sticky; top: 0; z-index: 10; box-shadow: 0 2px 2px -1px rgba(0, 0, 0, 0.2);">
@@ -72,7 +75,6 @@
           <tbody>
             {% if details %}
               {% for row in details|dictsortreversed:"date" %}
-                {# --- FIX 1 Continued: Using stronger classes for visibility --- #}
                 <tr class="
                   {% if row.type == 'BUY' or row.type == 'CONVERSION(+)' or row.type == 'SUSPENSE(+)' %}
                     table-success
@@ -136,7 +138,6 @@
               </tr>
             </thead>
             <tbody>
-              {# --- FIX: Custom Dark Yellow Background (#ffc107) and Dark Red Text --- #}
               <tr class="fw-bold fs-5">
                 <td style="background-color: #ffc107 !important; color: #8B0000 !important;">Closing Bal.</td>
                 <td class="text-end" style="background-color: #ffc107 !important; color: #8B0000 !important;">{{ summary.closing_qty|intcomma }}</td>
@@ -166,7 +167,7 @@
         </div>
         <div class="card-body" style="font-size: 0.9em;">
           <div class="d-flex justify-content-between mb-2">
-            <span>Realized P/L</span>
+            <span>Realized P/L <small class="text-muted fst-italic">(BEP @ {{ summary.bep|floatformat:2|intcomma }})</small></span>
             <span class="fw-bold {% if summary.realized_pl >= 0 %}text-success{% else %}text-danger{% endif %}">
               Rs. {{ summary.realized_pl|floatformat:2|intcomma }}
             </span>
@@ -194,6 +195,14 @@
             <span>Total P/L</span>
             <h5 class="fw-bold text-primary mb-0" id="totalPL">Rs. 0.00</h5>
           </div>
+          
+          <div class="d-flex justify-content-between align-items-center mt-2 pt-2 border-top border-light">
+            <span class="text-muted small">Cash Dividends</span>
+            <span class="fw-semibold text-success small">
+              Rs. {{ summary.cash_dividend|floatformat:2|intcomma }}
+            </span>
+          </div>
+          
         </div>
       </div>
       {% endif %}
@@ -252,19 +261,20 @@
         <input type="text" class="form-control mb-3" id="modalSearch" onkeyup="filterHoldingsList()" placeholder="Type to filter list...">
 
         <div class="table-responsive">
-          <table class="table table-sm table-striped table-bordered table-hover" id="holdingsTable" style="font-size: 0.9rem;">
-            <thead class="table-light text-center">
+          <table class="table table-sm table-striped table-bordered table-hover" id="holdingsTable" style="font-size: 0.85rem;">
+            <thead class="table-light text-center align-middle">
               <tr>
-                <th rowspan="2" class="align-middle" onclick="sortTable('holdingsTable', 0, 'string')" style="cursor: pointer;">Script &#x21C5;</th>
-                <th rowspan="2" class="align-middle" onclick="sortTable('holdingsTable', 1, 'number')" style="cursor: pointer;">Kitta &#x21C5;</th>
-                <th rowspan="2" class="align-middle" onclick="sortTable('holdingsTable', 2, 'number')" style="cursor: pointer;">Amount (Book Value) &#x21C5;</th>
-                <th rowspan="2" class="align-middle" onclick="sortTable('holdingsTable', 3, 'number')" style="cursor: pointer;">BEP &#x21C5;</th>
-                <th rowspan="2" class="align-middle" onclick="sortTable('holdingsTable', 4, 'number')" style="cursor: pointer;">Close Price &#x21C5;</th>
+                <th rowspan="2" style="cursor: pointer;" onclick="sortTable('holdingsTable', 0, 'string')">Script &#x21C5;</th>
+                <th rowspan="2" style="cursor: pointer;" onclick="sortTable('holdingsTable', 1, 'number')">Kitta &#x21C5;</th>
+                <th rowspan="2" style="cursor: pointer;" onclick="sortTable('holdingsTable', 2, 'number')">Amount (Book Value) &#x21C5;</th>
+                <th rowspan="2" style="cursor: pointer;" onclick="sortTable('holdingsTable', 3, 'number')">WACC (Cost) &#x21C5;</th>
+                <th rowspan="2" style="cursor: pointer;" onclick="sortTable('holdingsTable', 4, 'number')">BEP (Adj.) &#x21C5;</th>
+                <th rowspan="2" style="cursor: pointer;" onclick="sortTable('holdingsTable', 5, 'number')">LTP &#x21C5;</th>
                 <th colspan="2">Profit / Loss</th>
               </tr>
               <tr>
-                <th onclick="sortTable('holdingsTable', 5, 'number')" style="cursor: pointer;">Realized P/L &#x21C5;</th>
-                <th onclick="sortTable('holdingsTable', 6, 'number')" style="cursor: pointer;">Unrealized P/L &#x21C5;</th>
+                <th style="cursor: pointer;" onclick="sortTable('holdingsTable', 6, 'number')">Realized P/L &#x21C5;</th>
+                <th style="cursor: pointer;" onclick="sortTable('holdingsTable', 7, 'number')">Unrealized P/L &#x21C5;</th>
               </tr>
             </thead>
             <tbody>
@@ -272,25 +282,31 @@
                 {% for item in holdings_list %}
                 <tr>
                   <td>
-                    <strong><a href="{% url 'my_portfolio:company_dashboard' %}?symbol={{ item.symbol }}">{{ item.symbol }}</a></strong>
-                    <br>
-                    <small class="text-muted">{{ item.script }}</small>
+                    <strong><a href="{% url 'my_portfolio:company_dashboard' %}?symbol={{ item.symbol }}" class="text-decoration-none">{{ item.symbol }}</a></strong>
+                    <div class="text-muted small">{{ item.script }}</div>
                   </td>
-                  <td class="text-end">{{ item.closing_kitta|intcomma }}</td>
-                  <td class="text-end">{{ item.book_value|floatformat:2|intcomma }}</td>
-                  <td class="text-end">{{ item.bep|floatformat:2|intcomma }}</td>
-                  <td class="text-end">{{ item.ltp|floatformat:2|intcomma }}</td>
-                  <td class="text-end {% if item.realized_pl > 0 %}text-success{% elif item.realized_pl < 0 %}text-danger{% endif %}">
+                  <td class="text-end align-middle">{{ item.closing_kitta|intcomma }}</td>
+                  
+                  <td class="text-end align-middle">
+                    <div class="fw-semibold">{{ item.book_value|floatformat:2|intcomma }}</div>
+                    <div class="text-muted small" style="font-size: 0.75rem;">({{ item.book_value_pct|floatformat:2 }}%)</div>
+                  </td>
+                  
+                  <td class="text-end align-middle">{{ item.wacc|floatformat:2|intcomma }}</td>
+                  <td class="text-end align-middle text-primary">{{ item.bep|floatformat:2|intcomma }}</td>
+                  <td class="text-end align-middle">{{ item.ltp|floatformat:2|intcomma }}</td>
+                  
+                  <td class="text-end align-middle {% if item.realized_pl > 0 %}text-success{% elif item.realized_pl < 0 %}text-danger{% endif %}">
                     {{ item.realized_pl|floatformat:2|intcomma }}
                   </td>
-                  <td class="text-end {% if item.unrealized_pl > 0 %}text-success{% elif item.unrealized_pl < 0 %}text-danger{% endif %}">
+                  <td class="text-end align-middle {% if item.unrealized_pl > 0 %}text-success{% elif item.unrealized_pl < 0 %}text-danger{% endif %}">
                     {{ item.unrealized_pl|floatformat:2|intcomma }}
                   </td>
                 </tr>
                 {% endfor %}
               {% else %}
                 <tr>
-                  <td colspan="7" class="text-center text-muted">No holdings found.</td>
+                  <td colspan="8" class="text-center text-muted py-3">No holdings found.</td>
                 </tr>
               {% endif %}
             </tbody>
@@ -306,9 +322,8 @@
 {% endblock %}
 
 {% block extra_js %}
-
 <script>
-// Object to store sort directions
+// ... (Previous sorting logic script) ...
 let sortDirections = {};
 
 function sortTable(tableId, colIndex, type) {
@@ -321,8 +336,9 @@ function sortTable(tableId, colIndex, type) {
   const newDirection = currentDirection === 'asc' ? 'desc' : 'asc';
   
   const parseNumber = (s) => {
-    s = String(s).replace(/,/g, '').replace('Rs. ', '');
-    if (s === '-') return 0;
+    // Remove currency symbols, commas, and extract the main number before any parentheses (for percentages)
+    s = String(s).replace(/,/g, '').replace('Rs. ', '').split('(')[0]; 
+    if (s.trim() === '-') return 0;
     return parseFloat(s) || 0;
   };
   
@@ -358,10 +374,9 @@ function sortTable(tableId, colIndex, type) {
   sortDirections[directionKey] = newDirection;
 }
 </script>
-
-
 <script>
 function filterHoldingsList() {
+// ... (Filter logic) ...
   const input = document.getElementById("modalSearch");
   const filter = input.value.toUpperCase();
   const table = document.getElementById("holdingsTable");
@@ -378,10 +393,9 @@ function filterHoldingsList() {
 }
 </script>
 
-
 {% if summary %}
 <script>
-// This script is for the SINGLE STOCK calculator
+// ... (Single Stock Calculator) ...
 function calculateUnrealized() {
   const marketPrice = parseFloat(document.getElementById('marketPrice').value);
   const realizedPL = parseFloat('{{ summary.realized_pl|default:0 }}');

@@ -54,5 +54,5 @@ urlpatterns = [
     path('report/broker_ledger/', views.broker_ledger_report, name='broker_ledger_report'),
     path('report/broker_ledger/download/', views.download_broker_ledger, name='download_broker_ledger'),
     path('api/broker_settlement_summary/', views.api_broker_settlement_summary, name='api_broker_settlement_summary'),
-    
+    path('report/sp_report/', views.sp_report, name='sp_report'),
 ]

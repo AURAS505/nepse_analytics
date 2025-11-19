@@ -27,6 +27,7 @@ from .models import Transaction, BrokerTransaction
 from nepse_data.models import Brokers
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
 from .utils import calculate_pma_details, calculate_overall_portfolio, get_holdings_on_date
+from adjustments_stock_price.models import PriceAdjustments
 
 
 from django.db import connection, transaction as db_transaction # db_transaction is needed for @db_transaction.atomic
@@ -43,6 +44,7 @@ from django.db.models.functions import Coalesce
 from datetime import date, timedelta
 from django.db.models import Min, Max
 from nepse_data.models import DividendHistory, StockPrices
+
 
 # --- Helper Functions ---
 
@@ -1881,3 +1883,226 @@ def api_broker_settlement_summary(request):
         
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
+    
+
+@login_required
+def sp_report(request):
+    # 1. Date Range Logic
+    start_date_str = request.GET.get('start_date')
+    end_date_str = request.GET.get('end_date')
+    selected_sector = request.GET.get('sector', '') 
+    
+    if end_date_str: 
+        end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+    else: 
+        end_date = timezone.now().date()
+        
+    if start_date_str: 
+        start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+    else:
+        start_date = end_date - timedelta(days=7)
+
+    # 2. Fetch Latest Prices (LTP) & Date
+    latest_prices = {}
+    ltp_date_str = ""
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                WITH RankedPrices AS (
+                    SELECT symbol, close_price, business_date,
+                        ROW_NUMBER() OVER(PARTITION BY symbol ORDER BY business_date DESC) as rn
+                    FROM stock_prices
+                )
+                SELECT symbol, close_price, business_date FROM RankedPrices WHERE rn = 1;
+            """)
+            rows = dictfetchall(cursor)
+            if rows:
+                valid_dates = [r['business_date'] for r in rows if r['business_date']]
+                if valid_dates:
+                    max_date = max(valid_dates)
+                    ltp_date_str = max_date.strftime('%Y-%m-%d')
+            for row in rows:
+                price = Decimal(row['close_price']) if row['close_price'] else Decimal('0.0')
+                latest_prices[row['symbol']] = price     
+    except Exception as e:
+        print(f"Error fetching prices: {e}")
+
+    # [cite_start]3. Fetch Bonus Adjustments (The Fix) [cite: 3]
+    # We only care about BONUS for Opp Cost because it's "free" extra quantity.
+    # Rights require payment, which complicates the 'Cost' part of the equation.
+    adjustments_map = defaultdict(list)
+    try:
+        # Filter only 'bonus' types
+        adjustments = PriceAdjustments.objects.filter(adjustment_type__iexact='bonus')
+        for adj in adjustments:
+            # Store relevant data: Date of book close and the %
+            adjustments_map[adj.symbol.script_ticker].append({
+                'date': adj.book_close_date,
+                'percent': adj.adjustment_percent
+            })
+    except Exception as e:
+        print(f"Error fetching adjustments: {e}")
+
+    # 4. Fetch Transactions
+    all_transactions = Transaction.objects.all().select_related('symbol').order_by('symbol__script_ticker', 'date', 'created_at')
+    
+    grouped_txns = defaultdict(list)
+    available_sectors = set() 
+
+    for txn in all_transactions:
+        if txn.symbol.sector:
+            available_sectors.add(txn.symbol.sector)
+        txn_dict = {
+            'unique_id': txn.unique_id,
+            'date': txn.date,
+            'broker': txn.broker,
+            'transaction_type': txn.transaction_type,
+            'kitta': txn.kitta,
+            'billed_amount': txn.billed_amount,
+            'eff_rate': txn.eff_rate,
+            'symbol_ticker': txn.symbol.script_ticker,
+            'sector': txn.symbol.sector
+        }
+        grouped_txns[txn.symbol.script_ticker].append(txn_dict)
+
+    buy_agg = defaultdict(lambda: {'p_kitta': 0, 't_purchase': Decimal('0.0'), 'ltp': Decimal('0.0'), 'sector': '', 'simulated_kitta': Decimal('0.0')})
+    sell_agg = defaultdict(lambda: {'s_kitta': 0, 'total_sales': Decimal('0.0'), 'profit': Decimal('0.0'), 'ltp': Decimal('0.0'), 'sector': '', 'simulated_kitta': Decimal('0.0')})
+    
+    # 5. Process each symbol
+    for symbol, txns in grouped_txns.items():
+        company_sector = txns[0].get('sector', '')
+        if selected_sector and selected_sector != 'All' and company_sector != selected_sector:
+            continue
+
+        ltp = latest_prices.get(symbol, Decimal('0.0'))
+        
+        dummy_price_info = {'close_price': ltp, 'business_date': None}
+        detailed_calculations, _ = calculate_pma_details(txns, dummy_price_info)
+        
+        # Get adjustments for this specific symbol
+        symbol_adjustments = adjustments_map.get(symbol, [])
+        
+        for row in detailed_calculations:
+            if start_date <= row['date'] <= end_date:
+                
+                # --- CALCULATE MULTIPLIER ---
+                # Check if any bonus happened AFTER this transaction
+                qty_multiplier = Decimal('1.0')
+                for adj in symbol_adjustments:
+                    if adj['date'] > row['date']:
+                        # Formula: Multiplier * (1 + percent/100)
+                        # E.g., 20% bonus -> 1 * 1.2 = 1.2
+                        factor = Decimal('1.0') + (adj['percent'] / Decimal('100.0'))
+                        qty_multiplier *= factor
+
+                if row['is_buy'] and row['type'] not in ('Balance b/d', 'CASH'):
+                    p_kitta = row['p_qty']
+                    p_amount = row['p_amount']
+                    
+                    if p_kitta > 0:
+                        buy_agg[symbol]['p_kitta'] += p_kitta
+                        buy_agg[symbol]['t_purchase'] += p_amount
+                        buy_agg[symbol]['ltp'] = ltp
+                        buy_agg[symbol]['sector'] = company_sector
+                        # Add the "Adjusted" Kitta for Opp Cost calculation
+                        buy_agg[symbol]['simulated_kitta'] += (Decimal(p_kitta) * qty_multiplier)
+
+                elif row['is_sale']:
+                    s_kitta = row['s_qty']
+                    s_amount = row['s_amount']
+                    profit = row['profit']
+                    
+                    if s_kitta > 0:
+                        sell_agg[symbol]['s_kitta'] += s_kitta
+                        sell_agg[symbol]['total_sales'] += s_amount
+                        sell_agg[symbol]['profit'] += profit
+                        sell_agg[symbol]['ltp'] = ltp
+                        sell_agg[symbol]['sector'] = company_sector
+                        # Add the "Adjusted" Kitta for Opp Cost calculation
+                        sell_agg[symbol]['simulated_kitta'] += (Decimal(s_kitta) * qty_multiplier)
+
+    # 6. Aggregate Lists & Calculate Adjusted Prices
+    buy_data = []
+    buy_totals = {'kitta': 0, 'amount': Decimal('0.0'), 'opp_cost': Decimal('0.0')}
+    
+    for symbol, data in buy_agg.items():
+        kitta = data['p_kitta']
+        amount = data['t_purchase']
+        ltp = data['ltp']
+        sim_kitta = data['simulated_kitta'] 
+        
+        avg_rate = (amount / Decimal(kitta)) if kitta > 0 else Decimal('0.0')
+        opp_cost = (ltp * sim_kitta) - amount
+        
+        # Calculate Effective Adjusted LTP for Display
+        # This shows what the price "feels like" relative to the original quantity
+        adj_ltp = ltp
+        if kitta > 0 and sim_kitta != kitta:
+            adj_ltp = (ltp * sim_kitta) / Decimal(kitta)
+        
+        buy_data.append({
+            'symbol': symbol,
+            'sector': data['sector'],
+            'p_kitta': kitta,
+            't_purchase': amount,
+            'rate': avg_rate,
+            'ltp': ltp,
+            'adj_ltp': adj_ltp, # New Field
+            'opp_cost': opp_cost
+        })
+        
+        buy_totals['kitta'] += kitta
+        buy_totals['amount'] += amount
+        buy_totals['opp_cost'] += opp_cost
+
+    sell_data = []
+    sell_totals = {'kitta': 0, 'amount': Decimal('0.0'), 'profit': Decimal('0.0'), 'opp_cost': Decimal('0.0')}
+    
+    for symbol, data in sell_agg.items():
+        kitta = data['s_kitta']
+        amount = data['total_sales']
+        profit = data['profit']
+        ltp = data['ltp']
+        sim_kitta = data['simulated_kitta'] 
+        
+        avg_rate = (amount / Decimal(kitta)) if kitta > 0 else Decimal('0.0')
+        opp_cost = (ltp * sim_kitta) - amount
+
+        # Calculate Effective Adjusted LTP for Display
+        adj_ltp = ltp
+        if kitta > 0 and sim_kitta != kitta:
+            adj_ltp = (ltp * sim_kitta) / Decimal(kitta)
+        
+        sell_data.append({
+            'symbol': symbol,
+            'sector': data['sector'],
+            's_kitta': kitta,
+            'total_sales': amount,
+            'rate': avg_rate,
+            'profit': profit,
+            'ltp': ltp,
+            'adj_ltp': adj_ltp, # New Field
+            'opp_cost': opp_cost
+        })
+        
+        sell_totals['kitta'] += kitta
+        sell_totals['amount'] += amount
+        sell_totals['profit'] += profit
+        sell_totals['opp_cost'] += opp_cost
+
+    buy_data.sort(key=lambda x: x['t_purchase'], reverse=True)
+    sell_data.sort(key=lambda x: x['total_sales'], reverse=True)
+    sorted_sectors = sorted(list(available_sectors))
+
+    context = {
+        'buy_data': buy_data,
+        'buy_totals': buy_totals,
+        'sell_data': sell_data,
+        'sell_totals': sell_totals,
+        'start_date': start_date,
+        'end_date': end_date,
+        'ltp_date': ltp_date_str,
+        'available_sectors': sorted_sectors,
+        'selected_sector': selected_sector
+    }
+    return render(request, 'my_portfolio/sp_report.html', context)
