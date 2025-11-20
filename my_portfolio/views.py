@@ -51,12 +51,19 @@ except ImportError:
 from nepse_data.models import Indices
 from .models import DematAccount, MeroShareHolding
 from .forms import DematAccountForm, MeroShareUploadForm, TransferRequestUploadForm
-from django.db import transaction as db_transaction
 
-
-
-
-
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet
+from openpyxl import Workbook
+from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+from .utils import _get_valuation_data
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
+from openpyxl.worksheet.page import PageMargins
 
 
 # --- Helper Functions ---
@@ -2797,3 +2804,379 @@ def download_my_share_csv(request):
         ])
         
     return response
+
+@login_required
+def generate_trading_sheet(request):
+    """
+    Generates a Trading Sheet (PDF & Excel).
+    - Values in CRORES.
+    - Excel: Auto-fit Columns, Fit Sheet on One Page (1x1), No Margins.
+    - Orientation: Portrait.
+    - Alignment: Center (Data), Left (Script/Sector).
+    """
+    
+    # --- A. PREPARE DATA ---
+    
+    # 1. Determine Report Date (Latest Snapshot)
+    # Always check for the latest snapshot date first
+    latest_snapshot = MeroShareHolding.objects.aggregate(Max('snapshot_date'))['snapshot_date__max']
+    report_date = latest_snapshot if latest_snapshot else date.today()
+    
+    today_calc = date.today()
+    start_date = date(2000, 1, 1) 
+    
+    # 2. Get Valuation Data
+    raw_valuation_data, grand_totals = _get_valuation_data(start_date, today_calc)
+    
+    CRORE = Decimal("10000000")
+    grand_bv_cr = grand_totals['cl_cost'] / CRORE
+    grand_mv_cr = grand_totals['market_val'] / CRORE
+    grand_vpl_cr = grand_totals['total_pl'] / CRORE
+
+    # 3. Get Demat Providers
+    demat_accounts = DematAccount.objects.all().order_by('id')
+    demat_headers = []
+    for acc in demat_accounts:
+        name_upper = acc.capital_name.upper()
+        if "GLOBAL" in name_upper: short_name = "GBIME"
+        elif "IMPERIAL" in name_upper: short_name = "IMP"
+        elif "NABIL" in name_upper: short_name = "NABIL"
+        else: short_name = name_upper.split()[0][:5]
+        demat_headers.append({'id': acc.id, 'name': short_name})
+
+    # 4. Get Free Balances
+    free_balance_map = defaultdict(dict)
+    ms_holdings = MeroShareHolding.objects.all()
+    for h in ms_holdings:
+        free_balance_map[h.symbol.script_ticker][h.demat_account.id] = h.free_balance
+
+    # 5. Get Technical Data
+    technical_map = {}
+    all_symbols = []
+    for sector_data in raw_valuation_data.values():
+        for row in sector_data['rows']:
+            if row['cl_kitta'] > 0:
+                all_symbols.append(row['company'])
+
+    for symbol in all_symbols:
+        price_obj = StockPrices.objects.filter(symbol=symbol).order_by('-business_date').first()
+        if price_obj:
+            high = float(price_obj.high_price or 0)
+            low = float(price_obj.low_price or 0)
+            close = float(price_obj.close_price or 0)
+            if high > 0:
+                pp = (high + low + close) / 3
+                technical_map[symbol] = {
+                    's1': Decimal((2 * pp) - high),
+                    's2': Decimal(pp - (high - low)),
+                    's3': Decimal(low - 2 * (high - pp)),
+                    'r1': Decimal((2 * pp) - low),
+                    'r2': Decimal(pp + (high - low)),
+                    'r3': Decimal(high + 2 * (pp - low))
+                }
+            else: technical_map[symbol] = {}
+        else: technical_map[symbol] = {}
+
+    # 6. Enrich Portfolio Data
+    sector_grouped_data = {}
+    sn_counter = 1
+    
+    for sector in sorted(raw_valuation_data.keys()):
+        content = raw_valuation_data[sector]
+        enriched_rows = []
+        
+        sec_total_bv = Decimal(0)
+        sec_total_mv = Decimal(0)
+        sec_total_vpl = Decimal(0)
+        
+        for row in content['rows']:
+            if row['cl_kitta'] <= 0: continue
+                
+            symbol = row['company']
+            qty = row['cl_kitta']
+            bv = row['cl_cost']
+            wacc = bv / qty if qty > 0 else 0
+            ltp = row['ltp']
+            mv = qty * ltp
+            vpl = mv - bv
+            pl_pct = (vpl / bv * 100) if bv > 0 else 0
+            
+            sec_total_bv += bv
+            sec_total_mv += mv
+            sec_total_vpl += vpl
+
+            free_bals = []
+            for d in demat_headers:
+                bal = free_balance_map.get(symbol, {}).get(d['id'], 0)
+                free_bals.append(bal)
+
+            tech = technical_map.get(symbol, {})
+            
+            item = {
+                'sn': sn_counter,
+                'grade': '', 
+                'script': symbol,
+                'qty': qty,
+                'wacc': wacc,
+                'bv_cr': bv / CRORE,
+                'ltp': ltp,
+                'mv_cr': mv / CRORE,
+                'vpl_cr': vpl / CRORE,
+                'pl_pct': pl_pct,
+                'free_balances': free_bals,
+                'target_buy': tech.get('s1', 0),
+                'price_sale': tech.get('r1', 0),
+                's2': tech.get('s2', 0),
+                'r2': tech.get('r2', 0),
+            }
+            enriched_rows.append(item)
+            sn_counter += 1
+        
+        if enriched_rows:
+            pct_of_bv = (sec_total_bv / grand_totals['cl_cost'] * 100) if grand_totals['cl_cost'] > 0 else 0
+            pct_of_mv = (sec_total_mv / grand_totals['market_val'] * 100) if grand_totals['market_val'] > 0 else 0
+            sec_pl_pct = (sec_total_vpl / sec_total_bv * 100) if sec_total_bv > 0 else 0
+            
+            sector_grouped_data[sector] = {
+                'rows': enriched_rows,
+                'totals': {
+                    'bv_str': f"{(sec_total_bv/CRORE):,.2f} ({pct_of_bv:.0f}%)",
+                    'mv_str': f"{(sec_total_mv/CRORE):,.2f} ({pct_of_mv:.0f}%)",
+                    'vpl_cr': sec_total_vpl / CRORE,
+                    'pl_pct_str': f"{sec_pl_pct:.1f}%"
+                }
+            }
+
+    # --- B. GENERATE EXCEL ---
+    if request.GET.get('type') == 'excel':
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Trading Sheet"
+        
+        # Styles
+        style_title = Font(size=14, bold=True, color="000000") 
+        style_header = Font(bold=True, color="FFFFFF")
+        fill_header = PatternFill("solid", fgColor="000000") 
+        fill_super = PatternFill("solid", fgColor="808080") 
+        fill_sector = PatternFill("solid", fgColor="D9D9D9")
+        fill_free_bal = PatternFill("solid", fgColor="FDE9D9") # Orange Lighter 80%
+        
+        thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+        center_align = Alignment(horizontal="center", vertical="center")
+        left_align = Alignment(horizontal="left", vertical="center")
+
+        # Title with Snapshot Date
+        ws.merge_cells('A1:F1'); ws['A1'] = "TRADING SHEET"; ws['A1'].font = style_title; ws['A1'].alignment = center_align
+        ws.merge_cells('A2:F2'); ws['A2'] = f"Date: {report_date.strftime('%Y-%m-%d')}"; ws['A2'].font = Font(bold=True); ws['A2'].alignment = center_align
+
+        # Columns
+        col_free_start = 11
+        col_free_end = 10 + len(demat_headers)
+        col_tech_start = col_free_end + 1
+        col_tech_end = col_tech_start + 3
+
+        # Super Headers
+        ws.merge_cells(start_row=3, start_column=col_free_start, end_row=3, end_column=col_free_end)
+        c = ws.cell(row=3, column=col_free_start, value="Free Balance")
+        c.font = style_header; c.fill = fill_super; c.alignment = center_align
+
+        ws.merge_cells(start_row=3, start_column=col_tech_start, end_row=3, end_column=col_tech_end)
+        c = ws.cell(row=3, column=col_tech_start, value="Support/Resistance")
+        c.font = style_header; c.fill = fill_super; c.alignment = center_align
+
+        # Main Headers
+        headers = ["SN", "Grade", "Script", "Qty", "Rate", "BV (Cr)", "LTP", "MV (Cr)", "V P/L (Cr)", "P/L %"]
+        for d in demat_headers: headers.append(d['name'])
+        headers.extend(["Tgt Buy", "Prc Sale", "S2", "R2"])
+        
+        ws.append([]) 
+        for col_num, header in enumerate(headers, 1):
+            cell = ws.cell(row=4, column=col_num, value=header)
+            cell.fill = fill_header; cell.font = style_header; cell.alignment = center_align; cell.border = thin_border
+
+        # Data Rows
+        for sector, data in sector_grouped_data.items():
+            rows = data['rows']; totals = data['totals']
+
+            # Sector Header with Totals
+            ws.append([sector.upper(), "", "", "", "", 
+                       totals['bv_str'], "", totals['mv_str'], float(totals['vpl_cr']), totals['pl_pct_str']])
+            sec_row_idx = ws.max_row
+            ws.merge_cells(start_row=sec_row_idx, start_column=1, end_row=sec_row_idx, end_column=5)
+            
+            for c in range(1, len(headers) + 1):
+                cell = ws.cell(row=sec_row_idx, column=c)
+                cell.font = Font(bold=True); cell.fill = fill_sector; cell.border = thin_border
+                if c == 1: cell.alignment = left_align # Sector Name Left
+                else: cell.alignment = center_align    # Totals Center
+                if c == 9: cell.number_format = '#,##0.00'
+
+            # Stock Rows
+            for r in rows:
+                row_data = [
+                    r['sn'], r['grade'], r['script'], float(r['qty']), float(r['wacc']), 
+                    float(r['bv_cr']), float(r['ltp']), float(r['mv_cr']), float(r['vpl_cr']), 
+                    f"{r['pl_pct']:.2f}%"
+                ]
+                for bal in r['free_balances']: row_data.append(float(bal) if bal > 0 else 0)
+                row_data.extend([float(r['target_buy']), float(r['price_sale']), float(r['s2']), float(r['r2'])])
+                ws.append(row_data)
+                
+                curr_row = ws.max_row
+                for col in range(1, len(headers) + 1):
+                    cell = ws.cell(row=curr_row, column=col)
+                    cell.border = thin_border
+                    
+                    # Highlight Free Balance
+                    if col_free_start <= col <= col_free_end:
+                        cell.font = Font(bold=True)
+                        cell.fill = fill_free_bal 
+
+                    if col == 4 or (11 <= col < col_tech_start): cell.number_format = '#,##0'
+                    elif col in [5, 6, 7, 8, 9] or col >= col_tech_start: cell.number_format = '#,##0.00'
+                    
+                    # Alignment
+                    if col == 3: cell.alignment = left_align # Script Left
+                    else: cell.alignment = center_align      # Others Center
+                    
+                    if col == 10:
+                        cell.font = Font(color="FF0000" if r['pl_pct'] < 0 else "006100")
+
+        # Grand Total
+        ws.append(["GRAND TOTAL", "", "", "", "", 
+                   f"{grand_bv_cr:,.2f}", "", f"{grand_mv_cr:,.2f}", f"{grand_vpl_cr:,.2f}", ""])
+        grand_row = ws.max_row
+        ws.merge_cells(start_row=grand_row, start_column=1, end_row=grand_row, end_column=5)
+        
+        for c in range(1, len(headers)+1):
+            cell = ws.cell(row=grand_row, column=c)
+            cell.fill = PatternFill("solid", fgColor="000000")
+            cell.font = Font(bold=True, color="FFFFFF")
+            if c == 1: cell.alignment = left_align
+            else: cell.alignment = center_align
+
+        # --- PRINT SETTINGS (FIT SHEET ON ONE PAGE) ---
+        ws.page_setup.orientation = ws.ORIENTATION_PORTRAIT
+        ws.page_setup.paperSize = ws.PAPERSIZE_A4
+        ws.page_setup.fitToPage = True
+        ws.page_setup.fitToHeight = 1  # Force 1 Page High
+        ws.page_setup.fitToWidth = 1   # Force 1 Page Wide
+        
+        # Remove Margins for Printing
+        ws.page_margins = PageMargins(left=0.1, right=0.1, top=0.1, bottom=0.1, header=0.0, footer=0.0)
+        ws.print_options.horizontalCentered = True
+
+        # Auto-fit Columns
+        for i, col_cells in enumerate(ws.columns, 1):
+            max_len = 0; col_letter = get_column_letter(i)
+            for cell in col_cells:
+                if cell.row <= 3: continue 
+                try:
+                    if cell.value: max_len = max(max_len, len(str(cell.value)))
+                except: pass
+            ws.column_dimensions[col_letter].width = min(max_len + 2.5, 50)
+
+        response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        response['Content-Disposition'] = f'attachment; filename="Trading_Sheet_{report_date}.xlsx"'
+        wb.save(response)
+        return response
+
+    # --- C. GENERATE PDF ---
+    else:
+        response = HttpResponse(content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="Trading_Sheet_{report_date}.pdf"'
+
+        doc = SimpleDocTemplate(response, pagesize=A4, rightMargin=2, leftMargin=2, topMargin=2, bottomMargin=2)
+        elements = []
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle('TinyTitle', parent=styles['Title'], fontSize=10, alignment=1)
+        
+        elements.append(Paragraph(f"<b>TRADING SHEET</b>", title_style))
+        elements.append(Paragraph(f"As of: {report_date.strftime('%Y-%m-%d')}", ParagraphStyle('Sub', parent=styles['Normal'], fontSize=6, alignment=1)))
+        elements.append(Spacer(1, 4))
+
+        base_headers = ["SN", "Gr", "Script", "Qty", "Rate", "BV(Cr)", "MR", "MV(Cr)", "VPL(Cr)", "P/L%"]
+        demat_names = [d['name'] for d in demat_headers]
+        tech_headers = ["Buy", "Sale", "S2", "R2"]
+        all_headers = base_headers + demat_names + tech_headers
+        total_cols = len(all_headers)
+
+        idx_script = 2 
+        idx_free_start = 10 
+        idx_free_end = 10 + len(demat_names)
+
+        weights = [0.5, 0.4, 1.1, 0.9, 0.7, 1.0, 0.7, 1.0, 0.9, 0.8] + ([0.8]*len(demat_names)) + [0.7, 0.7, 0.7, 0.7]
+        unit_w = 591 / sum(weights)
+        col_widths = [w * unit_w for w in weights]
+
+        table_data = [all_headers]
+        
+        tbl_style = [
+            ('BACKGROUND', (0, 0), (-1, 0), colors.black),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'), # Default Center
+            ('ALIGN', (idx_script, 0), (idx_script, -1), 'LEFT'), # Script Left
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 5),
+            ('GRID', (0, 0), (-1, -1), 0.1, colors.black),
+            ('FONTSIZE', (0, 1), (-1, -1), 4.5),
+            ('TOPPADDING', (0, 0), (-1, -1), 0.5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 0.5),
+            ('FONTNAME', (idx_free_start, 0), (idx_free_end-1, 0), 'Helvetica-BoldOblique'),
+        ]
+
+        row_idx = 1
+        for sector, data in sector_grouped_data.items():
+            rows = data['rows']; totals = data['totals']
+            
+            # Sector Row
+            sec_row = [sector.upper(), '', '', '', '', 
+                       totals['bv_str'], '', totals['mv_str'], f"{totals['vpl_cr']:,.2f}", totals['pl_pct_str']]
+            sec_row += [''] * (len(demat_names) + 4)
+            table_data.append(sec_row)
+            
+            tbl_style.append(('SPAN', (0, row_idx), (4, row_idx)))
+            tbl_style.append(('BACKGROUND', (0, row_idx), (-1, row_idx), colors.lightgrey))
+            tbl_style.append(('ALIGN', (0, row_idx), (0, row_idx), 'LEFT')) # Sector Left
+            tbl_style.append(('ALIGN', (5, row_idx), (-1, row_idx), 'CENTER')) # Totals Center
+            tbl_style.append(('FONTSIZE', (0, row_idx), (-1, row_idx), 5))
+            tbl_style.append(('FONTNAME', (0, row_idx), (-1, row_idx), 'Helvetica-Bold'))
+            tbl_style.append(('TEXTCOLOR', (0, row_idx), (-1, row_idx), colors.black))
+            row_idx += 1
+
+            for r in rows:
+                def fmt_num(n): return f"{n:,.0f}"
+                def fmt_cr(n): return f"{n:,.2f}"
+                row = [
+                    r['sn'], '', r['script'], fmt_num(r['qty']), fmt_num(r['wacc']), 
+                    fmt_cr(r['bv_cr']), fmt_num(r['ltp']), fmt_cr(r['mv_cr']), 
+                    fmt_cr(r['vpl_cr']), f"{r['pl_pct']:.1f}%"
+                ]
+                for bal in r['free_balances']: row.append(fmt_num(bal) if bal > 0 else "-")
+                row.extend([fmt_num(r['target_buy']), fmt_num(r['price_sale']), fmt_num(r['s2']), fmt_num(r['r2'])])
+                table_data.append(row)
+                
+                color = colors.red if r['pl_pct'] < 0 else colors.green
+                tbl_style.append(('TEXTCOLOR', (9, row_idx), (9, row_idx), color))
+                
+                # Highlight Free Balance
+                tbl_style.append(('BACKGROUND', (idx_free_start, row_idx), (idx_free_end-1, row_idx), colors.HexColor('#FDE9D9')))
+                tbl_style.append(('FONTNAME', (idx_free_start, row_idx), (idx_free_end-1, row_idx), 'Helvetica-Bold'))
+                row_idx += 1
+
+        grand_row = ['GRAND TOTAL', '', '', '', '', 
+                     f"{grand_bv_cr:,.2f}", '', f"{grand_mv_cr:,.2f}", f"{grand_vpl_cr:,.2f}", ""]
+        grand_row += [''] * (len(demat_names) + 4)
+        table_data.append(grand_row)
+        tbl_style.append(('SPAN', (0, row_idx), (4, row_idx)))
+        tbl_style.append(('FONTNAME', (0, row_idx), (-1, row_idx), 'Helvetica-Bold'))
+        tbl_style.append(('BACKGROUND', (0, row_idx), (-1, row_idx), colors.black))
+        tbl_style.append(('TEXTCOLOR', (0, row_idx), (-1, row_idx), colors.white))
+        tbl_style.append(('ALIGN', (0, row_idx), (0, row_idx), 'LEFT'))
+
+        main_table = Table(table_data, colWidths=col_widths, repeatRows=1)
+        main_table.setStyle(TableStyle(tbl_style))
+        elements.append(main_table)
+
+        doc.build(elements)
+        return response

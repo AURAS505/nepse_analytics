@@ -59,4 +59,5 @@ urlpatterns = [
     path('portfolio_watch/download/', views.download_portfolio_watch, name='download_portfolio_watch'),
     path('my_share_details/', views.my_share_details, name='my_share_details'),
     path('my_share_details/download/', views.download_my_share_csv, name='download_my_share_csv'),
+    path('my_share_details/trading_sheet/', views.generate_trading_sheet, name='generate_trading_sheet'),
 ]

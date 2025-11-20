@@ -30,6 +30,24 @@
             <button class="btn btn-warning shadow-sm" data-bs-toggle="modal" data-bs-target="#uploadTransferModal" title="Reduce Sold Shares">
                 <i class="bi bi-arrow-left-right"></i> EDIS
             </button>
+
+            <div class="btn-group">
+                <button type="button" class="btn btn-dark shadow-sm dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="bi bi-file-earmark-bar-graph"></i> Generate TS
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <li>
+                        <a class="dropdown-item" href="{% url 'my_portfolio:generate_trading_sheet' %}?type=pdf" target="_blank">
+                            <i class="bi bi-file-pdf text-danger me-2"></i> Download PDF
+                        </a>
+                    </li>
+                    <li>
+                        <a class="dropdown-item" href="{% url 'my_portfolio:generate_trading_sheet' %}?type=excel">
+                            <i class="bi bi-file-excel text-success me-2"></i> Download Excel
+                        </a>
+                    </li>
+                </ul>
+            </div>
         </div>
     </div>
 
