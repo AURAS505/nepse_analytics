@@ -162,3 +162,41 @@ class BrokerTransaction(models.Model):
             date_str = self.date.strftime('%Y%m%d')
             self.unique_id = f"B{self.broker.broker_no}-{date_str}-{str(uuid.uuid4()).split('-')[0]}"
         super().save(*args, **kwargs)
+
+class DematAccount(models.Model):
+    """
+    Stores details of the Demat Account (BOID) and the provider (Capital).
+    """
+    demat_number = models.CharField(max_length=16, unique=True, help_text="16-digit BOID")
+    capital_name = models.CharField(max_length=255, help_text="Name of the Capital/DP (e.g., Nabil Investment Banking)")
+    owner_name = models.CharField(max_length=255, blank=True, null=True, help_text="Name of the account holder")
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.capital_name} ({self.demat_number})"
+
+
+class MeroShareHolding(models.Model):
+    demat_account = models.ForeignKey(DematAccount, on_delete=models.CASCADE, related_name='holdings')
+    symbol = models.ForeignKey(Companies, on_delete=models.CASCADE, to_field='script_ticker')
+    
+    # --- NEW FIELD ---
+    snapshot_date = models.DateField(default=timezone.now, help_text="The date this balance represents")
+    
+    current_balance = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    pledge_balance = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    lockin_balance = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    freeze_balance = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    free_balance = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    demat_pending = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    remarks = models.TextField(blank=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-snapshot_date', 'symbol']
+        # Uniqueness now includes the date
+        unique_together = ('demat_account', 'symbol', 'snapshot_date')
+
+    def __str__(self):
+        return f"{self.symbol.script_ticker} ({self.snapshot_date}) - {self.current_balance}"

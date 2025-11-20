@@ -6,7 +6,6 @@ from django.urls import reverse
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_POST
 from django.utils import timezone
-from django.contrib import messages
 from .models import Transaction
 from listed_companies.models import Companies
 # --- RESTORED IMPORT ---
@@ -50,6 +49,14 @@ try:
 except ImportError:
     StockPricesAdj = None
 from nepse_data.models import Indices
+from .models import DematAccount, MeroShareHolding
+from .forms import DematAccountForm, MeroShareUploadForm, TransferRequestUploadForm
+from django.db import transaction as db_transaction
+
+
+
+
+
 
 
 # --- Helper Functions ---
@@ -2534,4 +2541,259 @@ def download_portfolio_watch(request):
     response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     response['Content-Disposition'] = 'attachment; filename="portfolio_watch.xlsx"'
     wb.save(response)
+    return response
+
+@login_required
+@db_transaction.atomic
+def my_share_details(request):
+    
+    # 1. Handle POST
+    if request.method == 'POST':
+        
+        # ... (add_demat logic is unchanged) ...
+        if 'add_demat' in request.POST:
+            # Copy your existing logic here
+            pass 
+
+        # --- UPLOAD MY SHARE (With Date) ---
+        elif 'upload_csv' in request.POST:
+            upload_form = MeroShareUploadForm(request.POST, request.FILES)
+            if upload_form.is_valid():
+                demat_account = upload_form.cleaned_data['demat_account']
+                target_date = upload_form.cleaned_data['snapshot_date'] # <--- GET DATE
+                file = request.FILES['file']
+                
+                try:
+                    decoded_file = file.read().decode('utf-8').splitlines()
+                    reader = csv.DictReader(decoded_file)
+                    
+                    def clean_decimal(val):
+                        if not val: return Decimal(0)
+                        return Decimal(str(val).replace(',', '').strip())
+                    
+                    success_count = 0
+                    for row in reader:
+                        scrip = row.get('Scrip', '').strip().upper()
+                        if not scrip: continue
+                        
+                        try:
+                            company = Companies.objects.get(script_ticker=scrip)
+                        except Companies.DoesNotExist:
+                            continue
+
+                        # Update or Create using snapshot_date
+                        MeroShareHolding.objects.update_or_create(
+                            demat_account=demat_account,
+                            symbol=company,
+                            snapshot_date=target_date, # <--- USE DATE
+                            defaults={
+                                'current_balance': clean_decimal(row.get('Current Balance')),
+                                'pledge_balance': clean_decimal(row.get('Pledge Balance')),
+                                'lockin_balance': clean_decimal(row.get('Lockin Balance')),
+                                'freeze_balance': clean_decimal(row.get('Freeze Balance')),
+                                'free_balance': clean_decimal(row.get('Free Balance')),
+                                'demat_pending': clean_decimal(row.get('Demat Pending')),
+                                'remarks': row.get('Remarks', '')
+                            }
+                        )
+                        success_count += 1
+                    
+                    messages.success(request, f"Synced {success_count} scripts for date {target_date}!")
+                    # Redirect with the date in URL so user sees what they just uploaded
+                    return redirect(f"{reverse('my_portfolio:my_share_details')}?filter_date={target_date}")
+                    
+                except Exception as e:
+                    messages.error(request, f"Error: {e}")
+
+        # --- UPLOAD EDIS (With Date) ---
+        elif 'upload_transfer_csv' in request.POST:
+            transfer_form = TransferRequestUploadForm(request.POST, request.FILES)
+            if transfer_form.is_valid():
+                demat_account = transfer_form.cleaned_data['demat_account']
+                target_date = transfer_form.cleaned_data['settlement_date'] # <--- GET DATE
+                file = request.FILES['file']
+                
+                try:
+                    decoded_file = file.read().decode('utf-8').splitlines()
+                    reader = csv.DictReader(decoded_file)
+                    TARGET_STATUSES = {'PENDING', 'ACKNOWLEDGED'}
+                    
+                    processed_count = 0
+                    modified_ids = []
+                    for row in reader:
+                        status = row.get('Status', '').strip().upper()
+                        if status not in TARGET_STATUSES: continue
+                        
+                        scrip = row.get('Scrip', '').strip().upper()
+                        try:
+                            qty_to_transfer = Decimal(row.get('Quantity', '0').replace(',', ''))
+                        except: continue
+                        if qty_to_transfer <= 0: continue
+
+                        try:
+                            # ONLY find holdings for the SPECIFIC DATE
+                            holding = MeroShareHolding.objects.get(
+                                demat_account=demat_account, 
+                                symbol__script_ticker=scrip,
+                                snapshot_date=target_date # <--- FILTER BY DATE
+                            )
+                        except MeroShareHolding.DoesNotExist:
+                            continue
+
+                        # ... (Calculations same as before) ...
+                        current_free = holding.free_balance
+                        current_pledge = holding.pledge_balance
+                        current_total = holding.current_balance
+                        
+                        if qty_to_transfer >= current_total:
+                            holding.current_balance = Decimal(0)
+                            holding.free_balance = Decimal(0)
+                            holding.pledge_balance = Decimal(0)
+                            # ... zero others ...
+                        else:
+                            holding.current_balance -= qty_to_transfer
+                            if qty_to_transfer <= current_free:
+                                holding.free_balance -= qty_to_transfer
+                            else:
+                                remainder = qty_to_transfer - current_free
+                                holding.free_balance = Decimal(0)
+                                if remainder > current_pledge:
+                                    holding.pledge_balance = Decimal(0)
+                                else:
+                                    holding.pledge_balance -= remainder
+                        
+                        holding.save()
+                        modified_ids.append(holding.id)
+                        processed_count += 1
+                    request.session['highlight_ids'] = modified_ids
+
+                    messages.success(request, f"Applied {processed_count} transfers to records of {target_date}.")
+                    return redirect(f"{reverse('my_portfolio:my_share_details')}?filter_date={target_date}")
+
+                except Exception as e:
+                    messages.error(request, f"Error: {e}")
+
+        # --- D. Delete Holdings ---
+        elif 'delete_holdings' in request.POST:
+            delete_date_str = request.POST.get('delete_date')
+            delete_demat_id = request.POST.get('delete_demat_account')
+
+            if delete_date_str and delete_demat_id:
+                try:
+                    target_date = datetime.strptime(delete_date_str, '%Y-%m-%d').date()
+                    filters = Q(updated_at__date=target_date)
+                    
+                    if delete_demat_id != 'ALL':
+                        filters &= Q(demat_account_id=delete_demat_id)
+                    
+                    deleted_count, _ = MeroShareHolding.objects.filter(filters).delete()
+                    
+                    if deleted_count > 0:
+                        messages.success(request, f"Deleted {deleted_count} records dated {target_date}.")
+                    else:
+                        messages.warning(request, f"No records found for date {target_date}.")
+                        
+                except ValueError:
+                    messages.error(request, "Invalid Date format.")
+                except Exception as e:
+                    messages.error(request, f"Error deleting records: {e}")
+            else:
+                messages.error(request, "Please select both a Date and a DP Provider.")
+            
+            return redirect('my_portfolio:my_share_details')
+
+    # 2. Prepare Context (GET)
+    demat_accounts = DematAccount.objects.all()
+    
+    # --- DATE FILTERING LOGIC ---
+    # By default, show TODAY or LATEST available date
+    filter_date_str = request.GET.get('filter_date')
+    selected_dp_id = request.GET.get('dp_id', 'ALL')
+    
+    holdings_query = MeroShareHolding.objects.select_related('symbol', 'demat_account').all()
+
+    # 1. Filter by DP
+    if selected_dp_id and selected_dp_id != 'ALL' and selected_dp_id.isdigit():
+        holdings_query = holdings_query.filter(demat_account_id=int(selected_dp_id))
+
+    # 2. Determine Date
+    available_dates = MeroShareHolding.objects.values_list('snapshot_date', flat=True).distinct().order_by('-snapshot_date')
+    
+    if filter_date_str:
+        try:
+            display_date = datetime.strptime(filter_date_str, '%Y-%m-%d').date()
+        except:
+            display_date = date.today()
+    else:
+        # Default to latest available date, or today if empty
+        display_date = available_dates.first() if available_dates else date.today()
+
+    # 3. Apply Date Filter
+    holdings = holdings_query.filter(snapshot_date=display_date)
+    highlight_ids = request.session.pop('highlight_ids', [])
+
+    context = {
+        'demat_form': DematAccountForm(),
+        'upload_form': MeroShareUploadForm(),
+        'transfer_form': TransferRequestUploadForm(),
+        'demat_accounts': demat_accounts,
+        'holdings': holdings,
+        'display_date': display_date, # To show in UI
+        'available_dates': available_dates, # For dropdown
+        'selected_dp_id': selected_dp_id,
+        'highlight_ids': highlight_ids, # <--- Pass to template
+    }
+    
+    return render(request, 'my_portfolio/my_share_details.html', context)
+
+
+
+@login_required
+def download_my_share_csv(request):
+    """
+    Downloads the current view of the holdings table based on the selected filter.
+    """
+    # Get the same filter from URL
+    dp_id = request.GET.get('dp_id', 'ALL')
+    
+    # Base Query
+    holdings = MeroShareHolding.objects.select_related('symbol', 'demat_account').all()
+    
+    # Apply Filter
+    filename_suffix = "All_DPs"
+    if dp_id and dp_id != 'ALL' and dp_id.isdigit():
+        holdings = holdings.filter(demat_account_id=int(dp_id))
+        # Try to get provider name for filename
+        try:
+            provider = DematAccount.objects.get(id=int(dp_id))
+            filename_suffix = provider.capital_name.replace(" ", "_")
+        except:
+            pass
+            
+    # Create Response
+    response = HttpResponse(content_type='text/csv')
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    response['Content-Disposition'] = f'attachment; filename="Net_Holdings_{filename_suffix}_{timestamp}.csv"'
+    
+    writer = csv.writer(response)
+    
+    # Write Header
+    writer.writerow([
+        'Scrip', 'Current Balance', 'Free Balance', 'Pledge Balance', 
+        'Lockin Balance', 'Freeze Balance', 'DP Provider', 'Last Updated'
+    ])
+    
+    # Write Rows
+    for h in holdings:
+        writer.writerow([
+            h.symbol.script_ticker,
+            h.current_balance,
+            h.free_balance,
+            h.pledge_balance,
+            h.lockin_balance,
+            h.freeze_balance,
+            h.demat_account.capital_name,
+            h.updated_at.strftime('%Y-%m-%d %H:%M') if h.updated_at else ""
+        ])
+        
     return response
