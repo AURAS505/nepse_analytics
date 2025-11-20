@@ -338,7 +338,7 @@
                         </a>
                     </div>
                     <div class="col-6 col-md-4 col-lg-2">
-                        <a href="#" class="btn btn-outline-success action-btn w-100">
+                        <a href="{% url 'my_portfolio:portfolio_watch' %}" class="btn btn-outline-success action-btn w-100">
                             <i class="bi bi-eye-fill action-icon"></i>
                             <div>Portfolio Watch</div>
                         </a>
@@ -372,7 +372,6 @@
         </div>
     </div>
 </div>
-
 {# --- 4. TOP 10 INVESTMENTS TABLE --- #}
 <div class="row mt-4">
     <div class="col-12">
@@ -384,51 +383,69 @@
                 <table class="table modern-table table-hover mb-0">
                     <thead>
                         <tr>
-                            <th class="text-start"><i class="bi bi-building me-1"></i> Company</th>
-                            <th class="text-end"><i class="bi bi-hash me-1"></i> Kitta</th>
-                            <th class="text-end"><i class="bi bi-cash me-1"></i> Investment</th>
-                            <th class="text-end"><i class="bi bi-graph-up me-1"></i> T.PL</th>
-                            <th class="text-end"><i class="bi bi-pie-chart me-1"></i> Sector %</th>
-                            <th class="text-end"><i class="bi bi-bar-chart me-1"></i> Total %</th>
-                            <th class="text-end"><i class="bi bi-calendar-week me-1"></i> 4W Change%</th>
-                            <th class="text-end"><i class="bi bi-shield-check me-1"></i> VaR 1W</th>
-                            <th class="text-end"><i class="bi bi-arrow-repeat me-1"></i> Mean Returns</th>
-                            <th class="text-end"><i class="bi bi-scatter me-1"></i> Risk-Return</th>
-                            <th class="text-end"><i class="bi bi-activity me-1"></i> Beta</th>
-                            <th class="text-end"><i class="bi bi-currency-rupee me-1"></i> EPS</th>
-                            <th class="text-end"><i class="bi bi-book me-1"></i> BVP</th>
-                            <th class="text-end"><i class="bi bi-percent me-1"></i> PE</th>
+                            {# Company stays Left Aligned #}
+                            <th class="text-start">Company</th>
+                            
+                            {# Centered Columns #}
+                            <th class="text-center">Kitta</th>
+                            <th class="text-center">Inv (Rs)</th>
+                            
+                            {# Rate and LTP centered between Investment and T.PL #}
+                            <th class="text-center">Rate</th>
+                            <th class="text-center">LTP</th>
+                            
+                            <th class="text-center">T.PL</th>
+                            <th class="text-center">Sec %</th>
+                            <th class="text-center">Tot %</th>
+                            <th class="text-center" title="4 Week Price Change">4W %</th>
+                            <th class="text-center" title="Value at Risk (1 Week)">VaR</th>
+                            <th class="text-center" title="Mean Returns">Mean R.</th>
+                            <th class="text-center" title="Risk-Return Trade-off">R-R</th>
+                            <th class="text-center">Beta</th>
+                            <th class="text-center">EPS</th>
+                            <th class="text-center">BVP</th>
+                            <th class="text-center">PE</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for row in stats.top_investments %}
                         <tr>
-                            <td class="text-start">
-                                <span class="company-name">{{ row.symbol }}</span>
-                            </td>
-                            <td class="text-end">{{ row.closing_kitta|intcomma }}</td>
-                            <td class="text-end fw-semibold">{{ row.book_value|floatformat:0|intcomma }}</td>
-                            <td class="text-end fw-bold {% if row.total_pl >= 0 %}profit{% else %}loss{% endif %}">
+                            {# Company Name (Left) #}
+                            <td class="text-start"><span class="company-name">{{ row.symbol }}</span></td>
+                            
+                            {# Numeric Values (Centered) #}
+                            <td class="text-center">{{ row.closing_kitta|intcomma }}</td>
+                            <td class="text-center fw-semibold">{{ row.book_value|floatformat:0|intcomma }}</td>
+                            
+                            {# Rate and LTP #}
+                            <td class="text-center">{{ row.wacc|floatformat:2|intcomma }}</td>
+                            <td class="text-center">{{ row.ltp|floatformat:2|intcomma }}</td>
+
+                            <td class="text-center fw-bold {% if row.total_pl >= 0 %}profit{% else %}loss{% endif %}">
                                 {{ row.total_pl|floatformat:0|intcomma }}
                             </td>
-                            <td class="text-end">{{ row.allocation_sector|floatformat:2 }}%</td>
-                            <td class="text-end">{{ row.allocation_total|floatformat:2 }}%</td>
-                            <td class="text-muted text-end">—</td>
-                            <td class="text-muted text-end">—</td>
-                            <td class="text-muted text-end">—</td>
-                            <td class="text-muted text-end">—</td>
-                            <td class="text-muted text-end">—</td>
-                            <td class="text-muted text-end">—</td>
-                            <td class="text-muted text-end">—</td>
-                            <td class="text-muted text-end">—</td>
+                            <td class="text-center">{{ row.allocation_sector|floatformat:1 }}%</td>
+                            <td class="text-center">{{ row.allocation_total|floatformat:1 }}%</td>
+                            
+                            {# Metrics (Centered with Percentages where applicable) #}
+                            <td class="text-center {% if row.four_week_change >= 0 %}text-success{% else %}text-danger{% endif %}">
+                                {{ row.four_week_change|floatformat:2 }}%
+                            </td>
+                            
+                            {# Added % symbol to VaR #}
+                            <td class="text-center">{{ row.var_1w|default:"-"|floatformat:2 }}%</td>
+                            
+                            {# Added % symbol to Mean Returns #}
+                            <td class="text-center">{{ row.mean_returns|default:"-"|floatformat:2 }}%</td>
+                            
+                            <td class="text-center">{{ row.risk_return|default:"-"|floatformat:2 }}</td>
+                            <td class="text-center">{{ row.beta|default:"-"|floatformat:2 }}</td>
+                            <td class="text-center">{{ row.eps|default:"-"|floatformat:2 }}</td>
+                            <td class="text-center">{{ row.bvp|default:"-"|floatformat:2 }}</td>
+                            <td class="text-center">{{ row.pe_ratio|default:"-"|floatformat:2 }}</td>
                         </tr>
                         {% empty %}
-                        <tr>
-                            <td colspan="14" class="text-center text-muted py-4">
-                                <i class="bi bi-inbox" style="font-size: 2rem;"></i>
-                                <div class="mt-2">No investments found</div>
-                            </td>
-                        </tr>
+                        <tr><td colspan="16" class="text-center p-4">No investments found</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>

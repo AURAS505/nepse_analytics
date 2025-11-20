@@ -18,6 +18,7 @@ from .models import StockPrices, Indices, Marcap, FloorsheetRaw, DividendHistory
 from django.http import JsonResponse
 from django.db.models import Value
 from django.db.models.functions import Concat
+from .models import StockPrices, Indices, Marcap, FloorsheetRaw, DividendHistory, CompanyMetrics
 
 # This is the correct import for your FiscalYear model
 from nepali_datetime.models import FiscalYear, NepaliCalendar
@@ -782,6 +783,71 @@ def data_entry_view(request):
             messages.success(request, f"Dividend History upload successful! Created {inserted_rows} new records. Updated {updated_rows} records. Failed {failed_rows} rows.")
             return redirect('nepse_data:data_entry')
         
+# --- NEW: METRICS UPLOAD LOGIC ---
+        elif request.POST.get('action') == 'upload_metrics':
+            metrics_file = request.FILES.get('metrics_file')
+            if not metrics_file:
+                messages.error(request, "No file selected.")
+                return redirect('nepse_data:data_entry')
+
+            try:
+                # 1. Read file (CSV or Excel)
+                if metrics_file.name.endswith('.csv'):
+                    df = pd.read_csv(metrics_file, encoding='utf-8-sig')
+                else:
+                    df = pd.read_excel(metrics_file)
+
+                # 2. Normalize headers (strip spaces, lower case)
+                # We expect: date, symbol, items, value
+                df.columns = df.columns.str.strip().str.lower()
+
+                # 3. Validate columns
+                required_cols = ['date', 'symbol', 'items', 'value']
+                if not all(col in df.columns for col in required_cols):
+                    missing = [col for col in required_cols if col not in df.columns]
+                    messages.error(request, f"File missing columns: {', '.join(missing)}. Expected: Date, Symbol, Items, Value")
+                    return redirect('nepse_data:data_entry')
+
+                inserted_count = 0
+                updated_count = 0
+                failed_count = 0
+
+                # 4. Iterate and Save
+                for index, row in df.iterrows():
+                    try:
+                        row_date = clean_date(row['date'])
+                        row_symbol = str(row['symbol']).strip().upper()
+                        row_item = str(row['items']).strip()
+                        row_value = clean_decimal(row['value'])
+
+                        if not row_date or not row_symbol or not row_item:
+                            failed_count += 1
+                            continue
+
+                        obj, created = CompanyMetrics.objects.update_or_create(
+                            business_date=row_date,
+                            symbol=row_symbol,
+                            metric_item=row_item,
+                            defaults={
+                                'metric_value': row_value
+                            }
+                        )
+
+                        if created:
+                            inserted_count += 1
+                        else:
+                            updated_count += 1
+                    except Exception as e:
+                        print(f"Error row {index}: {e}")
+                        failed_count += 1
+
+                messages.success(request, f"Metrics Uploaded! Created: {inserted_count}, Updated: {updated_count}, Failed: {failed_count}")
+
+            except Exception as e:
+                messages.error(request, f"Error processing file: {e}")
+            
+            return redirect('nepse_data:data_entry')
+        
         else:
             messages.warning(request, "Unknown action.")
             return redirect('nepse_data:data_entry')
@@ -1432,7 +1498,21 @@ def company_lookup_json_view(request):
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
 
-
+def download_metrics_sample_view(request):
+    response = HttpResponse(content_type='text/csv')
+    response['Content-Disposition'] = 'attachment; filename="sample_company_metrics.csv"'
+    writer = csv.writer(response)
+    
+    # Header
+    writer.writerow(['Date', 'Symbol', 'Items', 'Value'])
+    
+    # Sample Data
+    writer.writerow(['2024-11-20', 'NABIL', 'PE Ratio', '25.5'])
+    writer.writerow(['2024-11-20', 'NABIL', 'EPS', '18.2'])
+    writer.writerow(['2024-11-20', 'NIFRA', 'Book Value', '110.50'])
+    writer.writerow(['2024-11-20', 'NTC', 'Market Cap (Billions)', '150.25'])
+    
+    return response
 # --- *** NEW VIEW ADDED (STEP 2) - NOW CORRECTED *** ---
 
 @require_POST

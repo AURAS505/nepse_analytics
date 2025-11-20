@@ -44,6 +44,12 @@ from django.db.models.functions import Coalesce
 from datetime import date, timedelta
 from django.db.models import Min, Max
 from nepse_data.models import DividendHistory, StockPrices
+from nepse_data.models import CompanyMetrics
+try:
+    from adjustments_stock_price.models import StockPricesAdj
+except ImportError:
+    StockPricesAdj = None
+from nepse_data.models import Indices
 
 
 # --- Helper Functions ---
@@ -256,12 +262,111 @@ def _get_valuation_data(start_date, end_date):
         final_data[sector] = {'rows': rows, 'totals': sector_totals[sector]}
         
     return final_data, grand_totals
+
+def get_fundamental_metrics(symbol_list):
+    """
+    MASTER FUNCTION: Fetches metrics for BOTH Dashboard and Portfolio Watch.
+    - Dashboard needs: EPS, BVP, Mean Returns, Risk-Return, 4W Change, VaR 1W
+    - Watch needs: VaR 1W, VaR 1M, Beta
+    """
+    if not symbol_list:
+        return {}
+
+    metrics_map = {}
+    
+    # --- 1. Fetch ALL Metrics from nepse_data.company_metrics ---
+    try:
+        with connection.cursor() as cursor:
+            placeholders = ','.join(['%s'] * len(symbol_list))
+            
+            # Combined Query: Includes items for Dashboard AND Portfolio Watch
+            query = f"""
+                WITH LatestMetrics AS (
+                    SELECT 
+                        symbol, 
+                        metric_item, 
+                        metric_value,
+                        ROW_NUMBER() OVER(PARTITION BY symbol, metric_item ORDER BY business_date DESC) as rn
+                    FROM company_metrics 
+                    WHERE symbol IN ({placeholders})
+                    AND metric_item IN (
+                        'VaR 1 Week @5%%', 
+                        'VaR 1 Month @5%%',             -- Needed for Watch
+                        'Mean returns [w,1Y]%%',        -- Needed for Dashboard
+                        'Estimated risk-return trade-off [w,1Y]', -- Needed for Dashboard
+                        'Beta Weekly',                  -- Needed for Watch & Dashboard
+                        'EPS (D)',                      -- Needed for Dashboard (PE calc)
+                        'Bvp'                           -- Needed for Dashboard
+                    )
+                )
+                SELECT symbol, metric_item, metric_value 
+                FROM LatestMetrics 
+                WHERE rn = 1;
+            """
+            
+            cursor.execute(query, symbol_list)
+            rows = dictfetchall(cursor)
+            
+            for row in rows:
+                sym = row['symbol']
+                if sym not in metrics_map: metrics_map[sym] = {}
+                
+                item = row['metric_item']
+                val = row['metric_value']
+                
+                # Map to keys used by BOTH views
+                if item == 'VaR 1 Week @5%': 
+                    metrics_map[sym]['var_1w'] = val
+                elif item == 'VaR 1 Month @5%': 
+                    metrics_map[sym]['var_1m'] = val
+                elif item == 'Beta Weekly': 
+                    metrics_map[sym]['beta'] = val
+                elif item == 'Mean returns [w,1Y]%': 
+                    metrics_map[sym]['mean_returns'] = val
+                elif item == 'Estimated risk-return trade-off [w,1Y]': 
+                    metrics_map[sym]['risk_return'] = val
+                elif item == 'EPS (D)': 
+                    metrics_map[sym]['eps'] = val
+                elif item == 'Bvp': 
+                    metrics_map[sym]['bvp'] = val
+
+    except Exception as e:
+        print(f"Error fetching company metrics: {e}")
+
+    # --- 2. Calculate 4-Week Price Change % (CRITICAL FOR DASHBOARD) ---
+    # Use StockPricesAdj if available, else StockPrices
+    PriceModel = StockPricesAdj if StockPricesAdj else StockPrices
+    price_field = 'close_price_adj' if StockPricesAdj else 'close_price'
+
+    today = date.today()
+    four_weeks_ago = today - timedelta(days=28)
+    
+    for sym in symbol_list:
+        if sym not in metrics_map: metrics_map[sym] = {}
+        
+        try:
+            # Get Latest Price
+            latest_obj = PriceModel.objects.filter(symbol=sym).order_by('-business_date').first()
+            # Get Old Price (closest to 4 weeks ago)
+            old_obj = PriceModel.objects.filter(symbol=sym, business_date__lte=four_weeks_ago).order_by('-business_date').first()
+
+            current_p = getattr(latest_obj, price_field, 0) if latest_obj else 0
+            old_p = getattr(old_obj, price_field, 0) if old_obj else 0
+
+            if current_p and old_p and old_p > 0:
+                metrics_map[sym]['four_week_change'] = ((current_p - old_p) / old_p) * 100
+            else:
+                metrics_map[sym]['four_week_change'] = 0
+                
+        except Exception as e:
+            metrics_map[sym]['four_week_change'] = 0
+
+    return metrics_map
+
 # ### --- END OF FIXED FUNCTION --- ###
 # --- STANDARD VIEWS ---
-
 @login_required
 def portfolio_home(request):
-    # (This view is correct and remains unchanged)
     stats = {
         'total_scrips_traded': 0,
         'total_holdings': 0,
@@ -279,6 +384,7 @@ def portfolio_home(request):
         'top_losers': []
     }
     
+    # 1. Fetch Market Cap Stats
     try:
         with connection.cursor() as cursor:
             cursor.execute("SELECT total_scrips_traded FROM marcap ORDER BY business_date DESC LIMIT 1")
@@ -287,6 +393,7 @@ def portfolio_home(request):
     except Exception as e:
         print(f"Error fetching marcap: {e}")
 
+    # 2. Fetch Latest Prices & Portfolio Data
     try:
         latest_prices = {}
         with connection.cursor() as cursor:
@@ -318,7 +425,14 @@ def portfolio_home(request):
             cursor.execute("SELECT * FROM my_portfolio_transaction ORDER BY symbol_id, date, created_at")
             all_transactions = dictfetchall(cursor)
 
+        # 3. Calculate Basic Portfolio Stats
         overall_stats, holdings_summary_list = calculate_overall_portfolio(all_transactions, latest_prices)
+        
+        # --- NEW STEP: Fetch Fundamental Metrics (VaR, Beta, etc.) ---
+        # Extract list of symbols we currently hold
+        held_symbols = [h['symbol'] for h in holdings_summary_list]
+        # Call our helper function
+        fundamental_data = get_fundamental_metrics(held_symbols)
         
         sector_book_values = defaultdict(Decimal)
         portfolio_book_value = overall_stats.get('book_value', Decimal('0.0'))
@@ -326,33 +440,71 @@ def portfolio_home(request):
             sector = h.get('sector', 'Unknown')
             sector_book_values[sector] += h['book_value']
 
+        # 4. Enrich Holdings with both Portfolio Stats and Fundamental Metrics
         enriched_holdings = []
         for h in holdings_summary_list:
+            # Standard Portfolio Stats
             book_val = h['book_value']
             total_pl = h['realized_pl'] + h['unrealized_pl']
             sector = h.get('sector', 'Unknown')
             sec_book_val = sector_book_values[sector]
+            
             h['allocation_sector'] = (book_val / sec_book_val * 100) if sec_book_val > 0 else Decimal(0)
             h['allocation_total'] = (book_val / portfolio_book_value * 100) if portfolio_book_value > 0 else Decimal(0)
             h['roi_individual'] = (total_pl / book_val * 100) if book_val > 0 else Decimal(0)
             h['contribution_sector'] = (total_pl / sec_book_val * 100) if sec_book_val > 0 else Decimal(0)
             h['contribution_total'] = (total_pl / portfolio_book_value * 100) if portfolio_book_value > 0 else Decimal(0)
             h['total_pl'] = total_pl
+            
+            # --- NEW: Attach Fundamental Metrics ---
+            sym = h['symbol']
+            metrics = fundamental_data.get(sym, {})
+            
+            h['var_1w'] = metrics.get('var_1w')
+            h['mean_returns'] = metrics.get('mean_returns')
+            h['risk_return'] = metrics.get('risk_return')
+            h['beta'] = metrics.get('beta')
+            h['bvp'] = metrics.get('bvp')
+            h['four_week_change'] = metrics.get('four_week_change', 0)
+            
+            # EPS and PE Calculation
+            h['eps'] = metrics.get('eps')
+            
+            # Calculate PE Ratio: Market Price / EPS
+            # We use the LTP from latest_prices which is already in 'h'
+            if h['ltp'] and h['eps'] and float(h['eps']) != 0:
+                try:
+                    h['pe_ratio'] = float(h['ltp']) / float(h['eps'])
+                except:
+                    h['pe_ratio'] = 0
+            else:
+                h['pe_ratio'] = 0
+
             enriched_holdings.append(h)
 
+        # 5. Finalize Stats for Template
         CRORE = Decimal('10000000.0')
         if stats['total_investment']: stats['total_investment_crore'] = stats['total_investment'] / CRORE
+        
         stats['total_market_value'] = overall_stats.get('market_value', Decimal('0.0'))
         if stats['total_market_value']: stats['total_market_value_crore'] = stats['total_market_value'] / CRORE
+        
         stats['total_profit_loss'] = overall_stats.get('total_profit', Decimal('0.0'))
         if stats['total_profit_loss']: stats['total_profit_loss_crore'] = stats['total_profit_loss'] / CRORE
+        
         stats['realized_pl'] = overall_stats.get('realized_pl', Decimal('0.0'))
         stats['unrealized_pl'] = overall_stats.get('unrealized_pl', Decimal('0.0'))
+        
         stats['available_shares'] = sum(h['closing_kitta'] for h in holdings_summary_list)
         stats['holdings_count'] = len(holdings_summary_list)
+        
+        # Sort top investments by Book Value (Investment amount)
         stats['top_investments'] = sorted(enriched_holdings, key=lambda x: x['book_value'], reverse=True)[:10]
+        
+        # Gainers/Losers
         gainers = [h for h in enriched_holdings if h['total_pl'] >= 0]
         stats['top_gainers'] = sorted(gainers, key=lambda x: x['total_pl'], reverse=True)[:5]
+        
         losers = [h for h in enriched_holdings if h['total_pl'] < 0]
         stats['top_losers'] = sorted(losers, key=lambda x: x['total_pl'])[:10]
 
@@ -360,6 +512,7 @@ def portfolio_home(request):
         messages.error(request, f"Could not load portfolio statistics: {e}")
     
     return render(request, 'my_portfolio/dashboard.html', {'stats': stats})
+
 
 
 @login_required
@@ -2106,3 +2259,279 @@ def sp_report(request):
         'selected_sector': selected_sector
     }
     return render(request, 'my_portfolio/sp_report.html', context)
+
+def portfolio_watch(request):
+    # --- 1. Get Current NEPSE Index ---
+    current_index_val = Decimal('0.0')
+    latest_index_date = None
+    
+    try:
+        index_obj = Indices.objects.filter(sector__icontains='NEPSE').order_by('-date').first()
+        if index_obj:
+            current_index_val = index_obj.close
+            latest_index_date = index_obj.date
+    except Exception as e:
+        print(f"Error fetching index: {e}")
+        current_index_val = Decimal('2700.00')
+
+    # --- 2. Handle User Input ---
+    expected_index_input = request.GET.get('expected_index')
+    if expected_index_input:
+        try:
+            expected_index_val = Decimal(expected_index_input)
+        except:
+            expected_index_val = current_index_val
+    else:
+        expected_index_val = current_index_val
+
+    # --- 3. Calculate Market Change % ---
+    market_change_pct = Decimal('0.0')
+    if current_index_val > 0:
+        market_change_pct = (expected_index_val - current_index_val) / current_index_val
+
+    # --- 4. Fetch Metadata Dates ---
+    beta_updated_date = None
+    portfolio_updated_date = None # <--- NEW VARIABLE
+    
+    try:
+        # Beta Date
+        beta_updated_date = CompanyMetrics.objects.filter(metric_item='Beta Weekly').aggregate(Max('business_date'))['business_date__max']
+        
+        # Portfolio Updated Date (Last Transaction Date) <--- NEW LOGIC
+        last_txn = Transaction.objects.order_by('-date').first()
+        if last_txn:
+            portfolio_updated_date = last_txn.date
+        else:
+            portfolio_updated_date = date.today()
+            
+    except:
+        pass
+
+    # --- 5. Fetch Portfolio Data ---
+    try:
+        latest_prices = {}
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                WITH RankedPrices AS (
+                    SELECT symbol, close_price, business_date,
+                        ROW_NUMBER() OVER(PARTITION BY symbol ORDER BY business_date DESC) as rn
+                    FROM stock_prices
+                )
+                SELECT symbol, close_price, business_date FROM RankedPrices WHERE rn = 1;
+            """)
+            for row in dictfetchall(cursor):
+                latest_prices[row['symbol']] = {
+                    'close_price': row.get('close_price') or Decimal('0.0'),
+                    'business_date': row.get('business_date')
+                }
+
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT * FROM my_portfolio_transaction ORDER BY symbol_id, date, created_at")
+            all_transactions = dictfetchall(cursor)
+
+        _, holdings_summary_list = calculate_overall_portfolio(all_transactions, latest_prices)
+        held_symbols = [h['symbol'] for h in holdings_summary_list]
+        fundamental_data = get_fundamental_metrics(held_symbols)
+
+    except Exception as e:
+        messages.error(request, f"Error loading data: {e}")
+        holdings_summary_list = []
+        fundamental_data = {}
+
+    # --- 6. Process Data ---
+    holdings_summary_list.sort(key=lambda x: (x.get('sector', ''), x['symbol']))
+
+    sector_data = defaultdict(lambda: {
+        'rows': [], 'total_cost': Decimal('0.0'), 'total_value': Decimal('0.0'), 
+        'total_forecast_value': Decimal('0.0'), 'total_max_loss_1w': Decimal('0.0'), 'total_max_loss_1m': Decimal('0.0')
+    })
+    
+    grand_total = {
+        'cost': Decimal('0.0'), 'value': Decimal('0.0'), 'forecast_value': Decimal('0.0'),
+        'max_loss_1w': Decimal('0.0'), 'max_loss_1m': Decimal('0.0')
+    }
+
+    sn_counter = 1
+    for h in holdings_summary_list:
+        symbol = h['symbol']
+        metrics = fundamental_data.get(symbol, {})
+        
+        beta_val = metrics.get('beta')
+        beta = Decimal(str(beta_val)) if beta_val is not None else Decimal('1.0')
+        
+        stock_change_pct = beta * market_change_pct
+        ltp = h['ltp']
+        forecast_price = ltp * (Decimal('1.0') + stock_change_pct)
+        
+        closing_qty = h['closing_kitta']
+        market_val = ltp * closing_qty
+        forecast_val = forecast_price * closing_qty
+
+        var_1w = Decimal(str(metrics.get('var_1w') or 0))
+        var_1m = Decimal(str(metrics.get('var_1m') or 0))
+        max_loss_1w = market_val * (var_1w / Decimal('100.0'))
+        max_loss_1m = market_val * (var_1m / Decimal('100.0'))
+
+        row = {
+            'sn': sn_counter, 'symbol': symbol, 'script': h['script'],
+            'kitta': closing_qty, 'wacc': h['wacc'], 'ltp': ltp, 'market_val': market_val,
+            'beta': beta, 'forecast_price': forecast_price, 'forecast_val': forecast_val,
+            'forecast_diff': forecast_val - market_val, 'forecast_pct_change': stock_change_pct * 100,
+            'var_1w': var_1w, 'max_loss_1w': max_loss_1w, 'var_1m': var_1m, 'max_loss_1m': max_loss_1m
+        }
+        sn_counter += 1
+        sec = h['sector']
+        sector_data[sec]['rows'].append(row)
+        
+        sector_data[sec]['total_cost'] += h['book_value']
+        sector_data[sec]['total_value'] += market_val
+        sector_data[sec]['total_forecast_value'] += forecast_val
+        sector_data[sec]['total_max_loss_1w'] += max_loss_1w
+        sector_data[sec]['total_max_loss_1m'] += max_loss_1m
+
+        grand_total['cost'] += h['book_value']
+        grand_total['value'] += market_val
+        grand_total['forecast_value'] += forecast_val
+        grand_total['max_loss_1w'] += max_loss_1w
+        grand_total['max_loss_1m'] += max_loss_1m
+
+    for sec, data in sector_data.items():
+        data['total_forecast_diff'] = data['total_forecast_value'] - data['total_value']
+
+    grand_total['forecast_diff'] = grand_total['forecast_value'] - grand_total['value']
+    sorted_sector_data = dict(sorted(sector_data.items()))
+
+    context = {
+        'current_index': current_index_val,
+        'latest_index_date': latest_index_date,
+        'beta_updated_date': beta_updated_date,
+        'portfolio_updated_date': portfolio_updated_date, # <--- Passed to template
+        'expected_index': expected_index_val,
+        'market_change_pct': market_change_pct * 100,
+        'sector_data': sorted_sector_data,
+        'grand_total': grand_total
+    }
+    return render(request, 'my_portfolio/portfolio_watch.html', context)
+
+
+@login_required
+def download_portfolio_watch(request):
+    # --- 1. Re-run Logic to Get Data ---
+    # (We duplicate logic here to ensure download matches view exactly)
+    try:
+        current_index_val = Decimal('0.0')
+        index_obj = Indices.objects.filter(sector__icontains='NEPSE').order_by('-date').first()
+        if index_obj: current_index_val = index_obj.close
+        else: current_index_val = Decimal('2700.00')
+
+        expected_index_input = request.GET.get('expected_index')
+        expected_index_val = Decimal(expected_index_input) if expected_index_input else current_index_val
+
+        market_change_pct = Decimal('0.0')
+        if current_index_val > 0:
+            market_change_pct = (expected_index_val - current_index_val) / current_index_val
+
+        latest_prices = {}
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                WITH RankedPrices AS (
+                    SELECT symbol, close_price, business_date,
+                        ROW_NUMBER() OVER(PARTITION BY symbol ORDER BY business_date DESC) as rn
+                    FROM stock_prices
+                )
+                SELECT symbol, close_price, business_date FROM RankedPrices WHERE rn = 1;
+            """)
+            for row in dictfetchall(cursor):
+                latest_prices[row['symbol']] = {'close_price': row.get('close_price') or Decimal('0.0')}
+
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT * FROM my_portfolio_transaction ORDER BY symbol_id, date, created_at")
+            all_transactions = dictfetchall(cursor)
+
+        _, holdings_summary_list = calculate_overall_portfolio(all_transactions, latest_prices)
+        held_symbols = [h['symbol'] for h in holdings_summary_list]
+        fundamental_data = get_fundamental_metrics(held_symbols)
+        
+        holdings_summary_list.sort(key=lambda x: (x.get('sector', ''), x['symbol']))
+
+    except Exception as e:
+        return HttpResponse(f"Error generating data: {e}")
+
+    # --- 2. Create Excel ---
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Portfolio Watch"
+    
+    # Styles
+    font_bold = Font(bold=True)
+    align_center = Alignment(horizontal='center')
+    align_right = Alignment(horizontal='right')
+    border_thin = Side(style='thin')
+    border_all = Border(left=border_thin, right=border_thin, top=border_thin, bottom=border_thin)
+    fill_header = PatternFill(start_color="E0E0E0", end_color="E0E0E0", fill_type="solid")
+
+    # Info Header
+    ws['A1'] = f"Portfolio Watch Report (Expected NEPSE: {expected_index_val})"
+    ws['A1'].font = Font(size=12, bold=True)
+    
+    headers = [
+        "S.N.", "Symbol", "Sector", "Kitta", "WACC", "LTP", "Market Value",
+        "Beta", "Fcst Price", "Fcst Value", "Fcst Diff",
+        "VaR 1W %", "Max Loss 1W", "VaR 1M %", "Max Loss 1M"
+    ]
+    
+    ws.append([]) # Spacer
+    ws.append(headers)
+    
+    # Header Style
+    for cell in ws[3]:
+        cell.font = font_bold
+        cell.fill = fill_header
+        cell.alignment = align_center
+        cell.border = border_all
+
+    sn = 1
+    row_num = 4
+    
+    for h in holdings_summary_list:
+        symbol = h['symbol']
+        metrics = fundamental_data.get(symbol, {})
+        beta_val = metrics.get('beta')
+        beta = Decimal(str(beta_val)) if beta_val is not None else Decimal('1.0')
+        
+        stock_change_pct = beta * market_change_pct
+        ltp = h['ltp']
+        forecast_price = ltp * (Decimal('1.0') + stock_change_pct)
+        closing_qty = h['closing_kitta']
+        market_val = ltp * closing_qty
+        forecast_val = forecast_price * closing_qty
+        
+        var_1w = Decimal(str(metrics.get('var_1w') or 0))
+        var_1m = Decimal(str(metrics.get('var_1m') or 0))
+        max_loss_1w = market_val * (var_1w / Decimal('100.0'))
+        max_loss_1m = market_val * (var_1m / Decimal('100.0'))
+
+        row_data = [
+            sn, symbol, h['sector'], closing_qty, h['wacc'], ltp, market_val,
+            beta, forecast_price, forecast_val, forecast_val - market_val,
+            var_1w, max_loss_1w, var_1m, max_loss_1m
+        ]
+        ws.append(row_data)
+        sn += 1
+        row_num += 1
+
+    # Auto-width
+    for col in ws.columns:
+        max_length = 0
+        column = col[0].column_letter
+        for cell in col:
+            try:
+                if len(str(cell.value)) > max_length: max_length = len(str(cell.value))
+            except: pass
+        adjusted_width = (max_length + 2)
+        ws.column_dimensions[column].width = adjusted_width
+
+    response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    response['Content-Disposition'] = 'attachment; filename="portfolio_watch.xlsx"'
+    wb.save(response)
+    return response

@@ -1,0 +1,337 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}Portfolio Watch{% endblock %}
+
+{% block title_header %}
+<div class="d-flex align-items-center">
+    <a href="{% url 'my_portfolio:portfolio_home' %}" class="btn btn-outline-secondary btn-sm me-3 shadow-sm">
+        <i class="bi bi-arrow-left"></i> Back
+    </a>
+    <span><i class="bi bi-speedometer2"></i> Portfolio Watch</span>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Compact Table Styling */
+    .compact-table { font-size: 0.8rem; white-space: nowrap; }
+    .compact-table th, .compact-table td { padding: 0.4rem 0.5rem; vertical-align: middle; }
+    
+    /* Column Gradients */
+    .thead-holdings { background: #e9ecef; }
+    .thead-beta { background: #bbdefb; border-left: 2px solid #90caf9 !important; }
+    .thead-risk { background: #ffe0b2; border-left: 2px solid #ffcc80 !important; }
+    
+    .group-start { border-left: 2px solid #dee2e6 !important; }
+    .val-pos { color: #198754; font-weight: 600; }
+    .val-neg { color: #dc3545; font-weight: 600; }
+    
+    /* Sticky Header Logic */
+    .table-container {
+        max-height: 75vh;
+        overflow-y: auto;
+        position: relative;
+        border: 1px solid #dee2e6;
+        border-radius: 0.25rem;
+    }
+    
+    /* Apply sticky to all TH elements */
+    .table-container table thead th {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        background-clip: padding-box;
+    }
+    
+    /* Summary Box Styling */
+    .summary-card {
+        background-color: #fff;
+        border: 1px solid #e9ecef;
+        border-radius: 8px;
+        padding: 8px;
+        height: 100%;
+        text-align: center;
+        transition: transform 0.2s;
+    }
+    .summary-card:hover { transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0,0,0,0.05); }
+    .sum-label { font-size: 0.65rem; text-transform: uppercase; color: #6c757d; font-weight: 700; display: block; margin-bottom: 2px; }
+    .sum-val { font-size: 0.9rem; font-weight: 700; color: #212529; }
+    
+    /* Borders */
+    .border-holdings { border-bottom: 3px solid #6c757d; }
+    .border-sens { border-bottom: 3px solid #0d6efd; }
+    .border-risk { border-bottom: 3px solid #dc3545; }
+
+    /* Metadata Dates */
+    .meta-date { font-size: 0.7rem; font-style: italic; color: #6c757d; display: inline-block; margin-left: 10px; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+{# --- TOP PANEL --- #}
+<div class="card shadow-sm border-0 mb-3">
+    <div class="card-body p-3">
+        <div class="row g-0">
+            
+            {# LEFT: SENSITIVITY CONTROLS (Col-4) #}
+            <div class="col-lg-4 pe-lg-4 border-end-lg">
+                <h6 class="text-primary fw-bold mb-3"><i class="bi bi-sliders"></i> Sensitivity Controls</h6>
+                
+                <form method="GET" class="row g-2">
+                    {# 1. Current NEPSE #}
+                    <div class="col-4">
+                        <label class="small text-muted fw-bold d-block">Current</label>
+                        <div class="input-group input-group-sm">
+                            <input type="text" class="form-control fw-bold bg-light" value="{{ current_index|floatformat:0 }}" readonly>
+                        </div>
+                    </div>
+
+                    {# 2. Expected NEPSE #}
+                    <div class="col-4">
+                        <label class="small text-muted fw-bold d-block">Expected</label>
+                        <input type="number" step="0.01" class="form-control form-control-sm fw-bold border-primary text-primary" 
+                               name="expected_index" value="{{ expected_index|floatformat:0 }}">
+                    </div>
+
+                    {# 3. Projected Change #}
+                    <div class="col-4">
+                        <label class="small text-muted fw-bold d-block">Change %</label>
+                        <div class="form-control form-control-sm fw-bold {% if market_change_pct >= 0 %}text-success{% else %}text-danger{% endif %} bg-light">
+                            {{ market_change_pct|floatformat:2 }}%
+                        </div>
+                    </div>
+
+                    {# Calculate Button #}
+                    <div class="col-12 mt-3">
+                        <button type="submit" class="btn btn-primary btn-sm w-100 fw-bold shadow-sm">
+                            <i class="bi bi-calculator"></i> Recalculate Forecast
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            {# RIGHT: PORTFOLIO SUMMARY + ACTIONS (Col-8) #}
+            <div class="col-lg-8 ps-lg-4 mt-3 mt-lg-0 d-flex flex-column justify-content-between">
+                
+                {# Header with Dates #}
+                <div class="d-flex justify-content-between align-items-start mb-2">
+                    <h6 class="text-secondary fw-bold m-0"><i class="bi bi-pie-chart"></i> Portfolio Summary</h6>
+                    <div class="text-end lh-1">
+                        <span class="meta-date" title="Last Index Update">Index: {{ latest_index_date|date:"M d" }}</span>
+                        <span class="meta-date" title="Beta Extraction Date">Beta: {{ beta_updated_date|date:"M d"|default:"-" }}</span>
+                        {# Use the new portfolio_updated_date variable #}
+                        <span class="meta-date" title="Last Transaction Date">Port: {{ portfolio_updated_date|date:"M d"|default:"-" }}</span>
+                    </div>
+                </div>
+
+                {# Metrics Grid #}
+                <div class="row g-2 mb-3">
+                    {# Status #}
+                    <div class="col-4 col-md-2">
+                        <div class="summary-card border-holdings">
+                            <span class="sum-label">Book Val</span>
+                            <span class="sum-val">{{ grand_total.cost|floatformat:0|intcomma }}</span>
+                        </div>
+                    </div>
+                    <div class="col-4 col-md-2">
+                        <div class="summary-card border-holdings">
+                            <span class="sum-label">Mkt Val</span>
+                            <span class="sum-val">{{ grand_total.value|floatformat:0|intcomma }}</span>
+                        </div>
+                    </div>
+
+                    {# Sensitivity #}
+                    <div class="col-4 col-md-2">
+                        <div class="summary-card border-sens">
+                            <span class="sum-label text-primary">Exp. Val</span>
+                            <span class="sum-val text-primary">{{ grand_total.forecast_value|floatformat:0|intcomma }}</span>
+                        </div>
+                    </div>
+                    <div class="col-4 col-md-2">
+                        <div class="summary-card border-sens">
+                            <span class="sum-label">Gain/Loss</span>
+                            <span class="sum-val {% if grand_total.forecast_diff >= 0 %}text-success{% else %}text-danger{% endif %}">
+                                {{ grand_total.forecast_diff|floatformat:0|intcomma }}
+                            </span>
+                        </div>
+                    </div>
+
+                    {# Risk #}
+                    <div class="col-4 col-md-2">
+                        <div class="summary-card border-risk bg-danger bg-opacity-10">
+                            <span class="sum-label text-danger">Loss @ 1W</span>
+                            <span class="sum-val text-danger">{{ grand_total.max_loss_1w|floatformat:0|intcomma }}</span>
+                        </div>
+                    </div>
+                    <div class="col-4 col-md-2">
+                        <div class="summary-card border-risk bg-danger bg-opacity-10">
+                            <span class="sum-label text-danger">Loss @ 1M</span>
+                            <span class="sum-val text-danger">{{ grand_total.max_loss_1m|floatformat:0|intcomma }}</span>
+                        </div>
+                    </div>
+                </div>
+
+                {# BOTTOM: ACTIONS (Search & Download inside the same div) #}
+                <div class="row g-2 align-items-center pt-2 border-top">
+                    <div class="col-md-7">
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text bg-white text-muted border-end-0"><i class="bi bi-search"></i></span>
+                            <input type="text" id="companySearch" class="form-control border-start-0" placeholder="Search symbol or company...">
+                        </div>
+                    </div>
+                    <div class="col-md-5 text-end">
+                        <a href="{% url 'my_portfolio:download_portfolio_watch' %}?expected_index={{ expected_index }}" class="btn btn-success btn-sm w-100 fw-bold">
+                            <i class="bi bi-file-earmark-excel me-1"></i> Download Excel
+                        </a>
+                    </div>
+                </div>
+                
+            </div>
+        </div>
+    </div>
+</div>
+
+{# --- DATA TABLE --- #}
+<div class="table-container shadow-sm bg-white">
+    <table class="table table-bordered table-hover compact-table mb-0" id="watchTable">
+        <thead>
+            <tr class="text-center">
+                <th rowspan="2" class="thead-holdings">S.N.</th>
+                <th rowspan="2" class="thead-holdings">Symbol</th>
+                
+                <th colspan="4" class="thead-holdings group-start">Portfolio Status</th>
+                <th colspan="4" class="thead-beta">Sensitivity (Beta Forecast)</th>
+                <th colspan="4" class="thead-risk">Max Loss Potential (VaR)</th>
+            </tr>
+            <tr class="text-center text-muted small">
+                {# Status #}
+                <th class="thead-holdings group-start text-end">Kitta</th>
+                <th class="thead-holdings text-end">WACC</th>
+                <th class="thead-holdings text-end">LTP</th>
+                <th class="thead-holdings text-end">Value</th>
+
+                {# Beta #}
+                <th class="thead-beta text-center" style="width:50px;">Beta</th>
+                <th class="thead-beta text-end">Exp. Price</th>
+                <th class="thead-beta text-end">Exp. Value</th>
+                <th class="thead-beta text-end">Gain/Loss</th>
+
+                {# Risk #}
+                <th class="thead-risk text-center" style="width:50px;">VaR 1W</th>
+                <th class="thead-risk text-end text-danger">Loss 1W</th>
+                <th class="thead-risk text-center" style="width:50px;">VaR 1M</th>
+                <th class="thead-risk text-end text-danger">Loss 1M</th>
+            </tr>
+        </thead>
+
+        <tbody>
+            {% for sector, data in sector_data.items %}
+                {# SECTOR HEADER #}
+                <tr class="table-light fw-bold sector-row">
+                    <td colspan="2" class="ps-3 text-primary text-uppercase" style="font-size: 0.75rem;">
+                        <i class="bi bi-folder2-open me-1"></i> {{ sector }}
+                    </td>
+                    <td colspan="3" class="group-start"></td>
+                    <td class="text-end">{{ data.total_value|floatformat:0|intcomma }}</td>
+                    <td colspan="2" class="thead-beta"></td>
+                    <td class="text-end thead-beta">{{ data.total_forecast_value|floatformat:0|intcomma }}</td>
+                    <td class="text-end thead-beta {% if data.total_forecast_diff >= 0 %}val-pos{% else %}val-neg{% endif %}">
+                        {{ data.total_forecast_diff|floatformat:0|intcomma }}
+                    </td>
+                    <td class="thead-risk"></td>
+                    <td class="text-end thead-risk text-danger">{{ data.total_max_loss_1w|floatformat:0|intcomma }}</td>
+                    <td class="thead-risk"></td>
+                    <td class="text-end thead-risk text-danger">{{ data.total_max_loss_1m|floatformat:0|intcomma }}</td>
+                </tr>
+
+                {# STOCK ROWS #}
+                {% for row in data.rows %}
+                <tr class="stock-row" data-symbol="{{ row.symbol|default:'' }}" data-script="{{ row.script|default:'' }}">
+                    <td class="text-center text-muted bg-light">{{ row.sn }}</td>
+                    
+                    {# SYMBOL WITH TOOLTIP (Company Name on Hover) #}
+                    <td class="fw-bold text-primary" data-bs-toggle="tooltip" data-bs-placement="right" title="{{ row.script }}">
+                        <a href="{% url 'my_portfolio:company_dashboard' %}?symbol={{ row.symbol }}" class="text-decoration-none">{{ row.symbol }}</a>
+                    </td>
+
+                    <td class="text-end group-start">{{ row.kitta|intcomma }}</td>
+                    <td class="text-end text-muted">{{ row.wacc|floatformat:1|intcomma }}</td>
+                    <td class="text-end fw-semibold">{{ row.ltp|floatformat:1|intcomma }}</td>
+                    <td class="text-end fw-bold">{{ row.market_val|floatformat:0|intcomma }}</td>
+                    
+                    <td class="text-center thead-beta bg-opacity-10">{{ row.beta }}</td>
+                    <td class="text-end thead-beta bg-opacity-10 text-primary">{{ row.forecast_price|floatformat:1|intcomma }}</td>
+                    <td class="text-end thead-beta bg-opacity-10">{{ row.forecast_val|floatformat:0|intcomma }}</td>
+                    <td class="text-end thead-beta bg-opacity-10 {% if row.forecast_diff >= 0 %}val-pos{% else %}val-neg{% endif %}">
+                        {{ row.forecast_diff|floatformat:0|intcomma }}
+                    </td>
+                    
+                    <td class="text-center thead-risk bg-opacity-10">{{ row.var_1w }}%</td>
+                    <td class="text-end thead-risk bg-opacity-10 text-danger">{{ row.max_loss_1w|floatformat:0|intcomma }}</td>
+                    <td class="text-center thead-risk bg-opacity-10">{{ row.var_1m }}%</td>
+                    <td class="text-end thead-risk bg-opacity-10 text-danger">{{ row.max_loss_1m|floatformat:0|intcomma }}</td>
+                </tr>
+                {% endfor %}
+            {% endfor %}
+        </tbody>
+        
+        <tfoot class="table-dark">
+            <tr>
+                <td colspan="2" class="text-center fw-bold">GRAND TOTAL</td>
+                <td colspan="3" class="group-start"></td>
+                <td class="text-end fw-bold">{{ grand_total.value|floatformat:0|intcomma }}</td>
+                
+                <td colspan="2" class="border-start border-secondary"></td>
+                <td class="text-end fw-bold">{{ grand_total.forecast_value|floatformat:0|intcomma }}</td>
+                <td class="text-end fw-bold {% if grand_total.forecast_diff >= 0 %}text-success{% else %}text-danger{% endif %}">
+                    {{ grand_total.forecast_diff|floatformat:0|intcomma }}
+                </td>
+
+                <td></td>
+                <td class="text-end fw-bold text-danger">{{ grand_total.max_loss_1w|floatformat:0|intcomma }}</td>
+                <td></td>
+                <td class="text-end fw-bold text-danger">{{ grand_total.max_loss_1m|floatformat:0|intcomma }}</td>
+            </tr>
+        </tfoot>
+    </table>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Initialize Tooltips
+        var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
+        var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+          return new bootstrap.Tooltip(tooltipTriggerEl)
+        })
+
+        // Client-Side Search
+        const searchInput = document.getElementById('companySearch');
+        
+        if(searchInput) {
+            searchInput.addEventListener('keyup', function() {
+                const query = this.value.toLowerCase().trim();
+                const rows = document.querySelectorAll('.stock-row');
+                
+                rows.forEach(row => {
+                    const symbol = (row.getAttribute('data-symbol') || "").toLowerCase();
+                    const script = (row.getAttribute('data-script') || "").toLowerCase();
+                    
+                    // If query is empty, show all
+                    if (!query) {
+                        row.style.display = '';
+                        return;
+                    }
+
+                    if (symbol.includes(query) || script.includes(query)) {
+                        row.style.display = '';
+                    } else {
+                        row.style.display = 'none';
+                    }
+                });
+            });
+        }
+    });
+</script>
+{% endblock %}

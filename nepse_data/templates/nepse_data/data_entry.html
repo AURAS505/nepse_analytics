@@ -36,7 +36,8 @@
                 </p>
                 <hr>
                 <form method="POST" action="{% url 'nepse_data:data_entry' %}" enctype="multipart/form-data" class="needs-validation" novalidate>
-                    {% csrf_token %} <div class="row g-3">
+                    {% csrf_token %} 
+                    <div class="row g-3">
                         <div class="col-md-12">
                             <label for="price_file" class="form-label"><b>Price CSV File</b><span class="text-danger">*</span></label>
                             <input class="form-control" type="file" id="price_file" name="price_file" accept=".csv" required>
@@ -180,87 +181,145 @@
             </div>
         </div>
 
-        <div class="row">
-            <div class="col-xl-10 mx-auto">
+        <div class="card shadow-sm border-0 mt-5">
+            <div class="card-header bg-secondary text-white">
+                <h5 class="mb-0">Upload Dividend History (Excel/CSV)</h5>
+            </div>
+            <div class="card-body p-4">
+                <p class="card-text">
+                    Upload a bulk file, or click "Manage Entries" to add, edit, delete, 
+                    or clear individual dividend records.
+                </p>
 
-                <div class="card shadow-sm border-0 mt-5">
-                    <div class="card-header bg-secondary text-white">
-                        <h5 class="mb-0">Upload Dividend History (Excel/CSV)</h5>
-                    </div>
-                    <div class="card-body p-4">
-                        <p class="card-text">
-                            Upload a bulk file, or click "Manage Entries" to add, edit, delete, 
-                            or clear individual dividend records.
-                        </p>
-
-                        <div class="text-end mb-3">
-                            <a href="{% url 'nepse_data:download_dividend_sample' %}" class="btn btn-sm btn-outline-info">
-                                <i class="bi bi-file-earmark-arrow-down"></i> Download Sample CSV
-                            </a>
-                        </div>
-                        <hr class="mt-0">
-
-                        <form method="POST" action="{% url 'nepse_data:data_entry' %}" enctype="multipart/form-data" class="needs-validation" novalidate>
-                            {% csrf_token %}
-                            <div class="row g-3">
-                                <div class="col-md-12">
-                                    <label for="dividend_file" class="form-label"><b>Upload File</b></label>
-                                    <input class="form-control" type="file" id="dividend_file" name="dividend_file" accept=".csv,.xlsx,.xls">
-                                </div>
-                            </div>
-                            <div class="text-end mt-4">
-                                <button type="submit" name="action" value="upload_dividend" class="btn btn-secondary btn-lg ms-2">
-                                    <i class="bi bi-upload"></i> Upload File
-                                </button>
-                            </div>
-                        </form>
-
-                        <hr>
-                        
-                        <div class="text-end">
-                            <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#manageDividendModal">
-                                <i class="bi bi-pencil-square"></i> Manage Entries
-                            </button>
-                        </div>
-
-                    </div>
+                <div class="text-end mb-3">
+                    <a href="{% url 'nepse_data:download_dividend_sample' %}" class="btn btn-sm btn-outline-info">
+                        <i class="bi bi-file-earmark-arrow-down"></i> Download Sample CSV
+                    </a>
                 </div>
+                <hr class="mt-0">
 
-                <div class="card shadow-sm border-0 mt-5">
-                    <div class="card-header bg-primary text-white">
-                        <h5 class="mb-0">Sync Dividend History to Adjustment Tool</h5>
+                <form method="POST" action="{% url 'nepse_data:data_entry' %}" enctype="multipart/form-data" class="needs-validation" novalidate>
+                    {% csrf_token %}
+                    <div class="row g-3">
+                        <div class="col-md-12">
+                            <label for="dividend_file" class="form-label"><b>Upload File</b></label>
+                            <input class="form-control" type="file" id="dividend_file" name="dividend_file" accept=".csv,.xlsx,.xls">
+                        </div>
                     </div>
-                    <div class="card-body p-4">
-                        <p class="card-text">
-                            This will read your <strong>Dividend History</strong> table and automatically create
-                            adjustment entries in the <strong>Stock Price Adjustment Tool</strong> for:
-                            <br>1. All <strong>Bonus Shares</strong>.
-                            <br>2. All <strong>Right Shares</strong>.
-                            <br>3. All <strong>Cash Dividends</strong> with a yield > 10% (based on par value and record date price).
-                        </p>
-                        <p class="card-text">
-                            It will skip any adjustments that already exist.
-                        </p>
-                        <hr>
-                        <form method="POST" action="{% url 'nepse_data:sync_dividends_to_adjustments' %}">
-                            {% csrf_token %}
-                            <div class="text-end">
-                                <button type="submit" class="btn btn-primary btn-lg" 
-                                        onclick="return confirm('This will scan all dividends and create new adjustment entries. This process cannot be undone. Are you sure you want to continue?');">
-                                    <i class="bi bi-arrow-repeat"></i>
-                                    Start Sync
-                                </button>
-                            </div>
-                        </form>
+                    <div class="text-end mt-4">
+                        <button type="submit" name="action" value="upload_dividend" class="btn btn-secondary btn-lg ms-2">
+                            <i class="bi bi-upload"></i> Upload File
+                        </button>
                     </div>
+                </form>
+
+                <hr>
+                
+                <div class="text-end">
+                    <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#manageDividendModal">
+                        <i class="bi bi-pencil-square"></i> Manage Entries
+                    </button>
                 </div>
-                <div class="card shadow-sm border-0 mt-5">
-                    <div class="card-header bg-warning">
-                        <h5 class="mb-0">Recalculate All Adjusted Prices</h5>
+            </div>
+        </div>
+
+        <div class="card shadow-sm border-0 mt-5">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0">Sync Dividend History to Adjustment Tool</h5>
+            </div>
+            <div class="card-body p-4">
+                <p class="card-text">
+                    This will read your <strong>Dividend History</strong> table and automatically create
+                    adjustment entries in the <strong>Stock Price Adjustment Tool</strong> for:
+                    <br>1. All <strong>Bonus Shares</strong>.
+                    <br>2. All <strong>Right Shares</strong>.
+                    <br>3. All <strong>Cash Dividends</strong> with a yield > 10% (based on par value and record date price).
+                </p>
+                <p class="card-text">
+                    It will skip any adjustments that already exist.
+                </p>
+                <hr>
+                <form method="POST" action="{% url 'nepse_data:sync_dividends_to_adjustments' %}">
+                    {% csrf_token %}
+                    <div class="text-end">
+                        <button type="submit" class="btn btn-primary btn-lg" 
+                                onclick="return confirm('This will scan all dividends and create new adjustment entries. This process cannot be undone. Are you sure you want to continue?');">
+                            <i class="bi bi-arrow-repeat"></i>
+                            Start Sync
+                        </button>
                     </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="card shadow-sm border-0 mt-5">
+            <div class="card-header text-white" style="background-color: #6f42c1;">
+                <h5 class="mb-0">Upload Company Metrics (CSV/Excel)</h5>
+            </div>
+            <div class="card-body p-4">
+                <p class="card-text">
+                    Upload generic company metrics (e.g., EPS, PE Ratio, Book Value).<br>
+                    Required columns: <strong>Date, Symbol, Items, Value</strong>.
+                </p>
+                <hr>
+                <form method="POST" action="{% url 'nepse_data:data_entry' %}" enctype="multipart/form-data" class="needs-validation" novalidate>
+                    {% csrf_token %}
+                    <div class="row g-3">
+                        <div class="col-md-12">
+                            <label for="metrics_file" class="form-label"><b>Metrics File</b><span class="text-danger">*</span></label>
+                            <input class="form-control" type="file" id="metrics_file" name="metrics_file" accept=".csv, .xlsx, .xls" required>
+                            <div class="invalid-feedback">
+                                Please select a .csv or .xlsx file.
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="text-end mt-4">
+                        <a href="{% url 'nepse_data:download_metrics_sample' %}" class="btn btn-outline-secondary btn-lg me-2">
+                            <i class="bi bi-download"></i> Sample
+                        </a>
+                        <button type="submit" name="action" value="upload_metrics" class="btn btn-primary btn-lg" style="background-color: #6f42c1; border-color: #6f42c1;">
+                            <i class="bi bi-upload"></i> Upload Metrics
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="card shadow-sm border-0 mt-5">
+            <div class="card-header bg-info text-white">
+                <h5 class="mb-0">Other Corporate Uploads</h5>
+            </div>
+            <div class="card-body p-4">
+                <h6 class="fw-bold">📊 Shareholding Pattern</h6>
+                <form method="post" action="{% url 'listed_companies:upload_shareholding' %}" enctype="multipart/form-data" class="mb-4">
+                    {% csrf_token %}
+                    <div class="input-group">
+                        <input type="file" class="form-control" name="shareholding_file" accept=".csv" required>
+                        <button type="submit" class="btn btn-info text-white">Upload</button>
+                        <a href="{% url 'listed_companies:download_shareholding_sample' %}" class="btn btn-outline-info">Sample</a>
+                    </div>
+                </form>
+
+                <h6 class="fw-bold">🔒 Lock-in Periods</h6>
+                <form method="post" action="{% url 'listed_companies:upload_lockin' %}" enctype="multipart/form-data">
+                    {% csrf_token %}
+                    <div class="input-group">
+                        <input type="file" class="form-control" name="lockin_file" accept=".csv" required>
+                        <button type="submit" class="btn btn-warning text-dark">Upload</button>
+                        <a href="{% url 'listed_companies:download_lockin_sample' %}" class="btn btn-outline-warning">Sample</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="card shadow-sm border-0 mt-5 mb-5">
+            <div class="card-header bg-warning">
+                <h5 class="mb-0">Recalculate All Adjusted Prices</h5>
+            </div>
             
             <div class="card-body p-4">
-                <p classV="card-text">
+                <p class="card-text">
                     Click this button to run the optimized recalculation process. This will:
                     <br>1. Run a full adjustment for all symbols <strong>with</strong> corporate actions (bonus/right).
                     <br>2. Run a fast copy for all symbols <strong>without</strong> corporate actions.
@@ -382,6 +441,7 @@
         </div>
     </div>
 </div>
+
 <div class="modal fade" id="manageDividendModal" tabindex="-1" aria-labelledby="manageDividendModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
@@ -432,7 +492,6 @@
                         <div class="col-md-6">
                             <div class="mb-3">
                                 <label for="add_fiscal_year" class="form-label">Fiscal Year</label>
-                                
                                 <input class="form-control" 
                                     list="fiscal_year_options" 
                                     id="add_fiscal_year" 
@@ -440,7 +499,6 @@
                                     placeholder="e.g., 2080/81"
                                     value="{% if current_fiscal_year %}{{ current_fiscal_year.fiscal_year }}{% endif %}"
                                     required>
-                                
                                 <datalist id="fiscal_year_options">
                                     {% for fy in all_fiscal_years %}
                                         <option value="{{ fy.fiscal_year }}">
@@ -647,53 +705,7 @@
         </div>
     </div>
 </div>
-<!-- Shareholding Pattern Upload -->
-<div class="card mb-3">
-    <div class="card-header bg-info text-white">
-        <h5 class="mb-0">📊 Upload Shareholding Pattern</h5>
-    </div>
-    <div class="card-body">
-        <form method="post" action="{% url 'listed_companies:upload_shareholding' %}" enctype="multipart/form-data">
-            {% csrf_token %}
-            <div class="mb-3">
-                <label class="form-label">Select CSV File:</label>
-                <input type="file" class="form-control" name="shareholding_file" accept=".csv" required>
-            </div>
-            <div class="d-flex gap-2">
-                <button type="submit" class="btn btn-info">
-                    <i class="fas fa-upload"></i> Upload Shareholding Data
-                </button>
-                <a href="{% url 'listed_companies:download_shareholding_sample' %}" class="btn btn-outline-info">
-                    <i class="fas fa-download"></i> Download Sample CSV
-                </a>
-            </div>
-        </form>
-    </div>
-</div>
 
-<!-- Lock-in Period Upload -->
-<div class="card mb-3">
-    <div class="card-header bg-warning text-dark">
-        <h5 class="mb-0">🔒 Upload Lock-in Periods</h5>
-    </div>
-    <div class="card-body">
-        <form method="post" action="{% url 'listed_companies:upload_lockin' %}" enctype="multipart/form-data">
-            {% csrf_token %}
-            <div class="mb-3">
-                <label class="form-label">Select CSV File:</label>
-                <input type="file" class="form-control" name="lockin_file" accept=".csv" required>
-            </div>
-            <div class="d-flex gap-2">
-                <button type="submit" class="btn btn-warning">
-                    <i class="fas fa-upload"></i> Upload Lock-in Data
-                </button>
-                <a href="{% url 'listed_companies:download_lockin_sample' %}" class="btn btn-outline-warning">
-                    <i class="fas fa-download"></i> Download Sample CSV
-                </a>
-            </div>
-        </form>
-    </div>
-</div>
 {% endblock %}
 
 
@@ -702,7 +714,7 @@
 {
     "startRecalc": "{% url 'adjustments_stock_price:start_recalc' %}",
     "recalcStatus": "/adjustments/recalc-status/",
-    "clearJob": "/adjustsments/clear-job/",
+    "clearJob": "/adjustments/clear-job/",
     
     "dividendEdit": "{% url 'nepse_data:edit_dividend' pk=0 %}",
     "dividendDelete": "{% url 'nepse_data:delete_dividend' pk=0 %}",
@@ -745,43 +757,43 @@ document.addEventListener('DOMContentLoaded', function() {
     let pollingInterval = null;
 
     // --- 1. Start Button Clicked ---
-    startButton.addEventListener('click', function() {
-        startButton.disabled = true;
-        startButton.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Starting...';
-        progressSection.style.display = 'block';
-        jobCompleteControls.style.display = 'none';
-        setProgressBar(0, 'Starting...', 'Initializing job...', 'bg-warning', true);
-        
-        // Find the *first* CSRF token on the page (more reliable)
-        const csrfToken = document.querySelector('input[name="csrfmiddlewaretoken"]').value;
+    if (startButton) {
+        startButton.addEventListener('click', function() {
+            startButton.disabled = true;
+            startButton.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Starting...';
+            progressSection.style.display = 'block';
+            jobCompleteControls.style.display = 'none';
+            setProgressBar(0, 'Starting...', 'Initializing job...', 'bg-warning', true);
+            
+            const csrfToken = document.querySelector('input[name="csrfmiddlewaretoken"]').value;
 
-        // Call the "start" endpoint
-        fetch(URLS.startRecalc, {
-            method: 'POST',
-            headers: {
-                'X-CSRFToken': csrfToken // Send CSRF token
-            }
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.status === 'started') {
-                currentJobId = data.job_id;
-                startButton.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Running...';
-                startPolling(currentJobId);
-            } else {
-                throw new Error(data.message || 'Failed to start job.');
-            }
-        })
-        .catch(error => {
-            console.error('Error starting job:', error);
-            progressMessage.innerText = `Error: ${error.message}`;
-            setProgressBar(100, 'Error', 'Error starting job.', 'bg-danger', false);
-            startButton.disabled = false;
-            startButton.innerHTML = 'Start Full Recalculation';
+            fetch(URLS.startRecalc, {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': csrfToken
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'started') {
+                    currentJobId = data.job_id;
+                    startButton.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Running...';
+                    startPolling(currentJobId);
+                } else {
+                    throw new Error(data.message || 'Failed to start job.');
+                }
+            })
+            .catch(error => {
+                console.error('Error starting job:', error);
+                progressMessage.innerText = `Error: ${error.message}`;
+                setProgressBar(100, 'Error', 'Error starting job.', 'bg-danger', false);
+                startButton.disabled = false;
+                startButton.innerHTML = 'Start Full Recalculation';
+            });
         });
-    });
+    }
 
-    // --- 2. Poll for Status (Reads Celery's state) ---
+    // --- 2. Poll for Status ---
     function startPolling(jobId) {
         pollingInterval = setInterval(() => {
             fetch(`${URLS.recalcStatus}${jobId}/`)
@@ -838,61 +850,61 @@ document.addEventListener('DOMContentLoaded', function() {
             clearInterval(pollingInterval);
             pollingInterval = null;
         }
-        startButton.disabled = false;
-        startButton.innerHTML = 'Start Full Recalculation';
+        if (startButton) {
+            startButton.disabled = false;
+            startButton.innerHTML = 'Start Full Recalculation';
+        }
         jobCompleteControls.style.display = 'block';
     }
     
-    clearJobButton.addEventListener('click', function() {
-        progressSection.style.display = 'none';
-        jobCompleteControls.style.display = 'none';
-        setProgressBar(0, '', '', 'bg-warning', true);
-        if (currentJobId) {
-            const csrfToken = document.querySelector('input[name="csrfmiddlewaretoken"]').value;
-            fetch(`${URLS.clearJob}${currentJobId}/`, { 
-                method: 'POST',
-                headers: { 'X-CSRFToken': csrfToken }
-            });
-            currentJobId = null;
-        }
-    });
+    if (clearJobButton) {
+        clearJobButton.addEventListener('click', function() {
+            progressSection.style.display = 'none';
+            jobCompleteControls.style.display = 'none';
+            setProgressBar(0, '', '', 'bg-warning', true);
+            if (currentJobId) {
+                const csrfToken = document.querySelector('input[name="csrfmiddlewaretoken"]').value;
+                fetch(`${URLS.clearJob}${currentJobId}/`, { 
+                    method: 'POST',
+                    headers: { 'X-CSRFToken': csrfToken }
+                });
+                currentJobId = null;
+            }
+        });
+    }
 });
 </script>
 
-
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // --- Store all URLs ---
     const URLS = JSON.parse(document.getElementById('js-urls').textContent);
     
-    // --- Store all modals in variables ---
     const manageModalEl = document.getElementById('manageDividendModal');
     const addModalEl = document.getElementById('addDividendModal');
     const editModalEl = document.getElementById('editDividendModal');
     const deleteModalEl = document.getElementById('deleteDividendModal');
     
-    // --- Ensure modals return to the main 'Manage' modal ---
     [addModalEl, editModalEl, deleteModalEl].forEach(modalEl => {
         if (modalEl) {
             modalEl.addEventListener('hidden.bs.modal', function(event) {
-                // If we are not closing the main modal itself...
                 if (!document.body.classList.contains('modal-open')) {
-                    // Re-open the main manage modal
                     const manageModal = new bootstrap.Modal(manageModalEl);
                     manageModal.show();
                 }
             });
         }
     });
-    // When the manage modal itself closes, we need to clear its state
-    manageModalEl.addEventListener('hidden.bs.modal', function() {
-        // Clear search results to be fresh next time
-        document.getElementById('dividend-search-results').innerHTML = '<p class="text-muted text-center">Enter a search term...</p>';
-        document.getElementById('dividend-search-input').value = '';
-    });
 
+    if (manageModalEl) {
+        manageModalEl.addEventListener('hidden.bs.modal', function() {
+            const res = document.getElementById('dividend-search-results');
+            if (res) res.innerHTML = '<p class="text-muted text-center">Enter a search term...</p>';
+            const inp = document.getElementById('dividend-search-input');
+            if (inp) inp.value = '';
+        });
+    }
 
-    // --- 1. Search Logic ---
+    // --- Search Logic ---
     const searchBtn = document.getElementById('dividend-search-btn');
     const searchInput = document.getElementById('dividend-search-input');
     const searchResultsDiv = document.getElementById('dividend-search-results');
@@ -949,79 +961,69 @@ document.addEventListener('DOMContentLoaded', function() {
             });
     };
 
-    searchBtn.addEventListener('click', runSearch);
-    searchInput.addEventListener('keyup', (event) => {
-        if (event.key === 'Enter') {
-            runSearch();
-        }
-    });
+    if (searchBtn) {
+        searchBtn.addEventListener('click', runSearch);
+        searchInput.addEventListener('keyup', (event) => {
+            if (event.key === 'Enter') {
+                runSearch();
+            }
+        });
+    }
 
-    // --- 2. Event Delegation for dynamic Edit/Delete buttons ---
-    searchResultsDiv.addEventListener('click', function(event) {
-        const button = event.target.closest('button');
-        if (!button) return;
+    if (searchResultsDiv) {
+        searchResultsDiv.addEventListener('click', function(event) {
+            const button = event.target.closest('button');
+            if (!button) return;
 
-        // --- Handle Edit Button Click ---
-        if (button.classList.contains('manage-edit-btn')) {
-            const itemData = JSON.parse(button.getAttribute('data-item'));
-            const form = editModalEl.querySelector('#editDividendForm');
-            
-            // Populate form
-            form.querySelector('#edit_fiscal_year').value = itemData.fiscal_year || '';
-            form.querySelector('#edit_symbol').value = itemData.symbol || '';
-            form.querySelector('#edit_company_name').value = itemData.company_name || '';
-            form.querySelector('#edit_book_closure_status').value = itemData.book_closure_status || '';
-            form.querySelector('#edit_bonus_percent').value = itemData.bonus_percent || '';
-            form.querySelector('#edit_cash_percent').value = itemData.cash_percent || '';
-            
-            // --- THIS IS THE NEWLY ADDED LINE ---
-            form.querySelector('#edit_right_percent').value = itemData.right_percent || '';
-            // --- END OF ADDITION ---
-            
-            form.querySelector('#edit_tax_percent').value = itemData.tax_percent || '';
-            form.querySelector('#edit_total_percent').value = itemData.total_percent || '';
-            form.querySelector('#edit_announcement_date').value = itemData.announcement_date || '';
-            form.querySelector('#edit_book_closure_date').value = itemData.book_closure_date || '';
-            form.querySelector('#edit_distribution_date').value = itemData.distribution_date || '';
-            form.querySelector('#edit_bonus_listing_date').value = itemData.bonus_listing_date || '';
-            
-            // Set form action and labels
-            form.action = URLS.dividendEdit.replace('0', itemData.id);
-            editModalEl.querySelector('#edit-id-display').textContent = itemData.id;
-            editModalEl.querySelector('#edit-symbol-display').textContent = itemData.symbol;
-        }
+            // Edit
+            if (button.classList.contains('manage-edit-btn')) {
+                const itemData = JSON.parse(button.getAttribute('data-item'));
+                const form = editModalEl.querySelector('#editDividendForm');
+                
+                form.querySelector('#edit_fiscal_year').value = itemData.fiscal_year || '';
+                form.querySelector('#edit_symbol').value = itemData.symbol || '';
+                form.querySelector('#edit_company_name').value = itemData.company_name || '';
+                form.querySelector('#edit_book_closure_status').value = itemData.book_closure_status || '';
+                form.querySelector('#edit_bonus_percent').value = itemData.bonus_percent || '';
+                form.querySelector('#edit_cash_percent').value = itemData.cash_percent || '';
+                form.querySelector('#edit_right_percent').value = itemData.right_percent || '';
+                form.querySelector('#edit_tax_percent').value = itemData.tax_percent || '';
+                form.querySelector('#edit_total_percent').value = itemData.total_percent || '';
+                form.querySelector('#edit_announcement_date').value = itemData.announcement_date || '';
+                form.querySelector('#edit_book_closure_date').value = itemData.book_close_date || ''; 
+                form.querySelector('#edit_distribution_date').value = itemData.distribution_date || '';
+                form.querySelector('#edit_bonus_listing_date').value = itemData.bonus_listing_date || '';
+                
+                form.action = URLS.dividendEdit.replace('0', itemData.id);
+                editModalEl.querySelector('#edit-id-display').textContent = itemData.id;
+                editModalEl.querySelector('#edit-symbol-display').textContent = itemData.symbol;
+            }
 
-        // --- Handle Delete Button Click ---
-        if (button.classList.contains('manage-delete-btn')) {
-            const dividendId = button.getAttribute('data-id');
-            const symbol = button.getAttribute('data-symbol');
-            const fy = button.getAttribute('data-fy');
-            const form = deleteModalEl.querySelector('#deleteDividendForm');
+            // Delete
+            if (button.classList.contains('manage-delete-btn')) {
+                const dividendId = button.getAttribute('data-id');
+                const symbol = button.getAttribute('data-symbol');
+                const fy = button.getAttribute('data-fy');
+                const form = deleteModalEl.querySelector('#deleteDividendForm');
 
-            form.action = URLS.dividendDelete.replace('0', dividendId);
-            deleteModalEl.querySelector('#delete-symbol-display').textContent = symbol;
-            deleteModalEl.querySelector('#delete-fy-display').textContent = fy;
-        }
-    }); // <-- This was the missing closing brace in your original file
+                form.action = URLS.dividendDelete.replace('0', dividendId);
+                deleteModalEl.querySelector('#delete-symbol-display').textContent = symbol;
+                deleteModalEl.querySelector('#delete-fy-display').textContent = fy;
+            }
+        });
+    }
 
-    // --- 3. Company Name Lookup ---
+    // --- Company Name Lookup ---
     const fetchCompanyName = (symbolInput, companyNameInput) => {
         const symbol = symbolInput.value.trim().toUpperCase();
-        if (symbol.length < 2) {
-            // Don't search if the symbol is too short
-            return;
-        }
+        if (symbol.length < 2) return;
 
         fetch(`${URLS.companyLookup}?symbol=${encodeURIComponent(symbol)}`)
             .then(response => {
-                if (response.ok) {
-                    return response.json();
-                }
-                return { company_name: '' }; // Default on error
+                if (response.ok) return response.json();
+                return { company_name: '' };
             })
             .then(data => {
-                // Set the value. If not found, data.company_name will be ''
-                // This allows the user to type a name manually if it's not found.
                 if (data.company_name) {
                     companyNameInput.value = data.company_name;
                 }
@@ -1031,19 +1033,14 @@ document.addEventListener('DOMContentLoaded', function() {
             });
     };
 
-    // --- Attach listeners to both 'Add' and 'Edit' modals ---
-    
-    // 'Add' Modal
     const addSymbolInput = document.getElementById('add_symbol');
     const addCompanyNameInput = document.getElementById('add_company_name');
     if (addSymbolInput) {
-        // 'change' event fires when the user clicks or tabs out of the field
         addSymbolInput.addEventListener('change', () => {
             fetchCompanyName(addSymbolInput, addCompanyNameInput);
         });
     }
 
-    // 'Edit' Modal
     const editSymbolInput = document.getElementById('edit_symbol');
     const editCompanyNameInput = document.getElementById('edit_company_name');
     if (editSymbolInput) {
@@ -1051,7 +1048,6 @@ document.addEventListener('DOMContentLoaded', function() {
             fetchCompanyName(editSymbolInput, editCompanyNameInput);
         });
     }
-
 });
 </script>
 {% endblock %}

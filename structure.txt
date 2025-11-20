@@ -76,6 +76,7 @@ nepse_analytics/
                 dashboard.html
                 edit_broker_transaction.html
                 edit_transaction.html
+                sp_report.html
                 transactions.html
                 valuation_report.html
     nepali_datetime/
@@ -116,7 +117,6 @@ nepse_analytics/
         templatetags/
             query_params.py
             __init__.py
-    static/
     statistical_analysis/
         admin.py
         apps.py

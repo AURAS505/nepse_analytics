@@ -34,10 +34,5 @@ urlpatterns = [
     path('dividend/add/', views.add_dividend_view, name='add_dividend'),
     path('company-lookup/', views.company_lookup_json_view, name='company_lookup_json'),
     path('dividend/search/', views.search_dividends_json_view, name='search_dividends_json'),
-    
-    
-    
-    
-    # --- END OF FIX ---
-
+    path('download-metrics-sample/', views.download_metrics_sample_view, name='download_metrics_sample'),
 ]

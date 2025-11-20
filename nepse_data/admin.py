@@ -6,7 +6,8 @@ from .models import (
     Marcap, 
     FloorsheetRaw, 
     Brokers, 
-    DividendHistory
+    DividendHistory,
+    CompanyMetrics
 )
 
 @admin.register(StockPrices)
@@ -189,3 +190,10 @@ class DividendHistoryAdmin(admin.ModelAdmin):
         )
     
     colored_status.short_description = 'Status'
+
+@admin.register(CompanyMetrics)
+class CompanyMetricsAdmin(admin.ModelAdmin):
+    list_display = ('business_date', 'symbol', 'metric_item', 'metric_value')
+    list_filter = ('business_date', 'metric_item')
+    search_fields = ('symbol', 'metric_item')
+    date_hierarchy = 'business_date'

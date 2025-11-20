@@ -182,4 +182,23 @@ class DividendHistory(models.Model):
 
     def __str__(self):
         return f"{self.symbol} - {self.fiscal_year} ({self.total_percent}%)"
-# --- END OF NEW MODEL ---
+
+class CompanyMetrics(models.Model):
+    id = models.AutoField(primary_key=True)
+    business_date = models.DateField(db_index=True)
+    symbol = models.CharField(max_length=20, db_index=True)
+    metric_item = models.CharField(max_length=255, verbose_name="Items") # Maps to 'Items'
+    metric_value = models.DecimalField(max_digits=20, decimal_places=4, blank=True, null=True) # Maps to 'Value'
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'company_metrics'
+        verbose_name = 'Company Metric'
+        verbose_name_plural = 'Company Metrics'
+        # Prevent duplicate entries for the same metric on the same day for the same company
+        unique_together = ('business_date', 'symbol', 'metric_item')
+
+    def __str__(self):
+        return f"{self.symbol} - {self.metric_item}: {self.metric_value} ({self.business_date})"
