@@ -20,7 +20,10 @@ import csv
 from decimal import Decimal
 from datetime import timedelta, datetime
 import io
-
+try:
+    from floorsheet_analysis.models import FloorsheetRaw
+except ImportError:
+    FloorsheetRaw = None
 # ========================================
 # SECTION 1: EXISTING CRUD VIEWS (Reconstructed)
 # ========================================
@@ -206,58 +209,46 @@ def download_sample_xlsx_view(request):
         return download_sample_csv_view(request)
 
 def check_missing_companies_view(request):
-    """Check which companies are in Price data but missing in Companies table."""
+    """
+    Check which companies are in Price OR Floorsheet data but missing in the Companies table.
+    """
     try:
-        if StockPrices is None:
-            return JsonResponse({'status': 'error', 'message': 'StockPrices model not found/imported.'})
-
-        # Get all unique symbols from StockPrices
-        price_symbols = set(StockPrices.objects.values_list('stock_symbol', flat=True).distinct())
-        # Get all unique tickers from Companies
+        # 1. Get symbols currently listed in your Companies table
         listed_tickers = set(Companies.objects.values_list('script_ticker', flat=True))
         
-        # Find difference
-        missing = list(price_symbols - listed_tickers)
+        # 2. Get symbols from Stock Prices
+        price_symbols = set()
+        if StockPrices:
+            price_symbols = set(StockPrices.objects.values_list('symbol', flat=True).distinct())
+            
+        # 3. Get symbols from Floorsheet
+        floorsheet_symbols = set()
+        if FloorsheetRaw:
+            # We defined 'stock_symbol' in the model above to match your DB
+            floorsheet_symbols = set(FloorsheetRaw.objects.values_list('stock_symbol', flat=True).distinct())
+
+        # 4. Combine all symbols found in data
+        all_data_symbols = price_symbols.union(floorsheet_symbols)
+        
+        # Clean up set (remove None or empty strings if any)
+        all_data_symbols = {s for s in all_data_symbols if s}
+        
+        # 5. Find the difference
+        missing = list(all_data_symbols - listed_tickers)
         missing.sort()
         
-        return JsonResponse({'status': 'success', 'missing_companies': missing})
+        return JsonResponse({
+            'status': 'success', 
+            'missing_companies': missing,
+            'stats': {
+                'found_in_prices': len(price_symbols),
+                'found_in_floorsheet': len(floorsheet_symbols),
+                'total_missing': len(missing)
+            }
+        })
+
     except Exception as e:
         return JsonResponse({'status': 'error', 'message': str(e)})
-
-# ========================================
-# SECTION 2: NEW SHAREHOLDING VIEWS
-# ========================================
-
-def company_shareholding_view(request, script_ticker):
-    """Display shareholding history for a specific company"""
-    company = get_object_or_404(Companies, script_ticker=script_ticker.upper())
-    
-    shareholding_history = ShareholdingPattern.objects.filter(
-        company_symbol=script_ticker.upper()
-    ).order_by('-as_of_date')
-    
-    latest_shareholding = shareholding_history.first()
-    
-    active_locks = LockInPeriod.objects.filter(
-        company_symbol=script_ticker.upper(),
-        is_active=True,
-        lock_in_end_date__gte=timezone.now().date()
-    ).order_by('lock_in_end_date')
-    
-    recent_actions = CorporateAction.objects.filter(
-        company_symbol=script_ticker.upper()
-    ).order_by('-announcement_date')[:10]
-    
-    context = {
-        'title': f'{company.company_name} - Shareholding',
-        'company': company,
-        'latest_shareholding': latest_shareholding,
-        'shareholding_history': shareholding_history,
-        'active_locks': active_locks,
-        'recent_actions': recent_actions,
-    }
-    
-    return render(request, 'listed_companies/company_shareholding.html', context)
 
 def shareholding_dashboard_view(request):
     """Dashboard showing all companies with their latest shareholding data"""
@@ -532,3 +523,17 @@ def mark_lockin_expired(request, lock_in_id):
         messages.error(request, f"Error updating lock-in: {e}")
     return redirect('listed_companies:lock_in_dashboard')
 
+def company_shareholding_view(request, script_ticker):
+    """
+    Renders the shareholding page for a specific company.
+    """
+    # Fetch the company or return a 404 error if not found
+    company = get_object_or_404(Companies, script_ticker=script_ticker)
+    
+    context = {
+        'company': company,
+        'script_ticker': script_ticker
+    }
+    
+    # Ensure you have this template created at: listed_companies/templates/listed_companies/shareholding.html
+    return render(request, 'listed_companies/shareholding.html', context)

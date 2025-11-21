@@ -2559,8 +2559,13 @@ def my_share_details(request):
         
         # ... (add_demat logic is unchanged) ...
         if 'add_demat' in request.POST:
-            # Copy your existing logic here
-            pass 
+            demat_form = DematAccountForm(request.POST)
+            if demat_form.is_valid():
+                demat_form.save()
+                messages.success(request, "Demat Account added successfully!")
+            else:
+                messages.error(request, "Error adding Demat Account. Please check the details.")
+            return redirect('my_portfolio:my_share_details')
 
         # --- UPLOAD MY SHARE (With Date) ---
         elif 'upload_csv' in request.POST:
