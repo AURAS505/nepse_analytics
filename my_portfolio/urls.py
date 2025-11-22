@@ -60,4 +60,7 @@ urlpatterns = [
     path('my_share_details/', views.my_share_details, name='my_share_details'),
     path('my_share_details/download/', views.download_my_share_csv, name='download_my_share_csv'),
     path('my_share_details/trading_sheet/', views.generate_trading_sheet, name='generate_trading_sheet'),
+    path('demat/manage/', views.manage_demat_accounts, name='manage_demat_accounts'),
+    path('demat/edit/<int:id>/', views.edit_demat_account, name='edit_demat_account'),
+    path('demat/delete/<int:id>/', views.delete_demat_account, name='delete_demat_account'),
 ]

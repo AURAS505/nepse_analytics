@@ -2693,7 +2693,9 @@ def my_share_details(request):
             if delete_date_str and delete_demat_id:
                 try:
                     target_date = datetime.strptime(delete_date_str, '%Y-%m-%d').date()
-                    filters = Q(updated_at__date=target_date)
+                    
+                    # --- CHANGE: Filter by snapshot_date, NOT updated_at ---
+                    filters = Q(snapshot_date=target_date) 
                     
                     if delete_demat_id != 'ALL':
                         filters &= Q(demat_account_id=delete_demat_id)
@@ -2701,9 +2703,9 @@ def my_share_details(request):
                     deleted_count, _ = MeroShareHolding.objects.filter(filters).delete()
                     
                     if deleted_count > 0:
-                        messages.success(request, f"Deleted {deleted_count} records dated {target_date}.")
+                        messages.success(request, f"Deleted {deleted_count} records for Snapshot Date {target_date}.")
                     else:
-                        messages.warning(request, f"No records found for date {target_date}.")
+                        messages.warning(request, f"No records found for Snapshot Date {target_date}.")
                         
                 except ValueError:
                     messages.error(request, "Invalid Date format.")
@@ -2716,19 +2718,13 @@ def my_share_details(request):
 
     # 2. Prepare Context (GET)
     demat_accounts = DematAccount.objects.all()
-    
-    # --- DATE FILTERING LOGIC ---
-    # By default, show TODAY or LATEST available date
     filter_date_str = request.GET.get('filter_date')
     selected_dp_id = request.GET.get('dp_id', 'ALL')
-    
     holdings_query = MeroShareHolding.objects.select_related('symbol', 'demat_account').all()
 
-    # 1. Filter by DP
     if selected_dp_id and selected_dp_id != 'ALL' and selected_dp_id.isdigit():
         holdings_query = holdings_query.filter(demat_account_id=int(selected_dp_id))
 
-    # 2. Determine Date
     available_dates = MeroShareHolding.objects.values_list('snapshot_date', flat=True).distinct().order_by('-snapshot_date')
     
     if filter_date_str:
@@ -2737,10 +2733,8 @@ def my_share_details(request):
         except:
             display_date = date.today()
     else:
-        # Default to latest available date, or today if empty
         display_date = available_dates.first() if available_dates else date.today()
 
-    # 3. Apply Date Filter
     holdings = holdings_query.filter(snapshot_date=display_date)
     highlight_ids = request.session.pop('highlight_ids', [])
 
@@ -2750,15 +2744,45 @@ def my_share_details(request):
         'transfer_form': TransferRequestUploadForm(),
         'demat_accounts': demat_accounts,
         'holdings': holdings,
-        'display_date': display_date, # To show in UI
-        'available_dates': available_dates, # For dropdown
+        'display_date': display_date,
+        'available_dates': available_dates,
         'selected_dp_id': selected_dp_id,
-        'highlight_ids': highlight_ids, # <--- Pass to template
+        'highlight_ids': highlight_ids,
     }
     
     return render(request, 'my_portfolio/my_share_details.html', context)
 
+# --- NEW VIEWS FOR MANAGING DEMAT ACCOUNTS ---
 
+@login_required
+def manage_demat_accounts(request):
+    accounts = DematAccount.objects.all().order_by('id')
+    return render(request, 'my_portfolio/manage_demat_accounts.html', {'accounts': accounts})
+
+@login_required
+def edit_demat_account(request, id):
+    account = get_object_or_404(DematAccount, id=id)
+    if request.method == 'POST':
+        form = DematAccountForm(request.POST, instance=account)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Demat Account updated successfully.")
+            return redirect('my_portfolio:manage_demat_accounts')
+    else:
+        form = DematAccountForm(instance=account)
+    
+    return render(request, 'my_portfolio/edit_demat_account.html', {'form': form, 'account': account})
+
+@login_required
+@require_POST
+def delete_demat_account(request, id):
+    account = get_object_or_404(DematAccount, id=id)
+    try:
+        account.delete()
+        messages.success(request, "Demat Account deleted successfully.")
+    except Exception as e:
+        messages.error(request, f"Error deleting account: {e}")
+    return redirect('my_portfolio:manage_demat_accounts')
 
 @login_required
 def download_my_share_csv(request):
@@ -2952,29 +2976,36 @@ def generate_trading_sheet(request):
                 }
             }
 
-    # --- B. GENERATE EXCEL ---
+# --- B. GENERATE EXCEL ---
     if request.GET.get('type') == 'excel':
         wb = Workbook()
         ws = wb.active
         ws.title = "Trading Sheet"
         
-        # Styles
+        # --- STYLES ---
         style_title = Font(size=14, bold=True, color="000000") 
         style_header = Font(bold=True, color="FFFFFF")
+        
+        # REQUESTED CHANGE: Increased Font Size (1.5 points larger than standard 11)
+        font_highlight = Font(size=12.5, bold=True) 
+        
         fill_header = PatternFill("solid", fgColor="000000") 
         fill_super = PatternFill("solid", fgColor="808080") 
         fill_sector = PatternFill("solid", fgColor="D9D9D9")
-        fill_free_bal = PatternFill("solid", fgColor="FDE9D9") # Orange Lighter 80%
+        
+        # REQUESTED CHANGE: Orange Color (Lighter 80%)
+        fill_highlight = PatternFill("solid", fgColor="FDE9D9") 
         
         thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
         center_align = Alignment(horizontal="center", vertical="center")
         left_align = Alignment(horizontal="left", vertical="center")
 
+        # --- HEADERS ---
         # Title with Snapshot Date
         ws.merge_cells('A1:F1'); ws['A1'] = "TRADING SHEET"; ws['A1'].font = style_title; ws['A1'].alignment = center_align
         ws.merge_cells('A2:F2'); ws['A2'] = f"Date: {report_date.strftime('%Y-%m-%d')}"; ws['A2'].font = Font(bold=True); ws['A2'].alignment = center_align
 
-        # Columns
+        # Columns Calculation
         col_free_start = 11
         col_free_end = 10 + len(demat_headers)
         col_tech_start = col_free_end + 1
@@ -2999,7 +3030,7 @@ def generate_trading_sheet(request):
             cell = ws.cell(row=4, column=col_num, value=header)
             cell.fill = fill_header; cell.font = style_header; cell.alignment = center_align; cell.border = thin_border
 
-        # Data Rows
+        # --- DATA ROWS ---
         for sector, data in sector_grouped_data.items():
             rows = data['rows']; totals = data['totals']
 
@@ -3032,22 +3063,34 @@ def generate_trading_sheet(request):
                     cell = ws.cell(row=curr_row, column=col)
                     cell.border = thin_border
                     
-                    # Highlight Free Balance
-                    if col_free_start <= col <= col_free_end:
-                        cell.font = Font(bold=True)
-                        cell.fill = fill_free_bal 
+                    # --- APPLYING REQUESTED STYLES ---
+                    
+                    # 1. Script/Symbol Column (Column 3)
+                    if col == 3:
+                        cell.font = font_highlight # Size 12.5, Bold
+                        cell.fill = fill_highlight # Orange 80%
+                        cell.alignment = left_align
+                    
+                    # 2. Free Balance Columns
+                    elif col_free_start <= col <= col_free_end:
+                        cell.font = font_highlight # Size 12.5, Bold
+                        cell.fill = fill_highlight # Orange 80%
+                        cell.alignment = center_align
 
+                    # 3. Default Styling for other columns
+                    else:
+                        if col == 10: # P/L Color
+                             cell.font = Font(color="FF0000" if r['pl_pct'] < 0 else "006100")
+                        
+                        # Center Align most data
+                        if col == 1 or col == 2 or col in [4, 5, 6, 7, 8, 9] or col >= col_tech_start:
+                            cell.alignment = center_align
+
+                    # Number formatting
                     if col == 4 or (11 <= col < col_tech_start): cell.number_format = '#,##0'
                     elif col in [5, 6, 7, 8, 9] or col >= col_tech_start: cell.number_format = '#,##0.00'
-                    
-                    # Alignment
-                    if col == 3: cell.alignment = left_align # Script Left
-                    else: cell.alignment = center_align      # Others Center
-                    
-                    if col == 10:
-                        cell.font = Font(color="FF0000" if r['pl_pct'] < 0 else "006100")
 
-        # Grand Total
+        # --- GRAND TOTAL ROW ---
         ws.append(["GRAND TOTAL", "", "", "", "", 
                    f"{grand_bv_cr:,.2f}", "", f"{grand_mv_cr:,.2f}", f"{grand_vpl_cr:,.2f}", ""])
         grand_row = ws.max_row
@@ -3060,18 +3103,16 @@ def generate_trading_sheet(request):
             if c == 1: cell.alignment = left_align
             else: cell.alignment = center_align
 
-        # --- PRINT SETTINGS (FIT SHEET ON ONE PAGE) ---
+        # --- PRINT & PAGE SETUP ---
         ws.page_setup.orientation = ws.ORIENTATION_PORTRAIT
         ws.page_setup.paperSize = ws.PAPERSIZE_A4
         ws.page_setup.fitToPage = True
-        ws.page_setup.fitToHeight = 1  # Force 1 Page High
-        ws.page_setup.fitToWidth = 1   # Force 1 Page Wide
-        
-        # Remove Margins for Printing
+        ws.page_setup.fitToHeight = 1  
+        ws.page_setup.fitToWidth = 1   
         ws.page_margins = PageMargins(left=0.1, right=0.1, top=0.1, bottom=0.1, header=0.0, footer=0.0)
         ws.print_options.horizontalCentered = True
 
-        # Auto-fit Columns
+        # Auto-width adjustment
         for i, col_cells in enumerate(ws.columns, 1):
             max_len = 0; col_letter = get_column_letter(i)
             for cell in col_cells:
@@ -3079,7 +3120,10 @@ def generate_trading_sheet(request):
                 try:
                     if cell.value: max_len = max(max_len, len(str(cell.value)))
                 except: pass
-            ws.column_dimensions[col_letter].width = min(max_len + 2.5, 50)
+            
+            # Add extra padding for the larger font columns (Script & Free Balance)
+            extra_padding = 4 if (i == 3 or col_free_start <= i <= col_free_end) else 2.5
+            ws.column_dimensions[col_letter].width = min(max_len + extra_padding, 50)
 
         response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
         response['Content-Disposition'] = f'attachment; filename="Trading_Sheet_{report_date}.xlsx"'

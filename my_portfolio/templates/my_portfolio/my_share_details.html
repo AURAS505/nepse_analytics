@@ -173,9 +173,15 @@
                         {{ demat_form.owner_name }}
                     </div>
                 </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                    <button type="submit" class="btn btn-primary">Save DP Details</button>
+                <div class="modal-footer justify-content-between">
+                    <a href="{% url 'my_portfolio:manage_demat_accounts' %}" class="btn btn-info text-white">
+                        <i class="bi bi-gear-fill"></i> Manage Providers
+                    </a>
+                    
+                    <div>
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                        <button type="submit" class="btn btn-primary">Save DP Details</button>
+                    </div>
                 </div>
             </form>
         </div>

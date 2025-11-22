@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}Edit Demat Account{% endblock %}
+
+{% block content %}
+<div class="container mt-4" style="max-width: 600px;">
+    <div class="card shadow">
+        <div class="card-header">
+            <h4 class="mb-0">Edit Demat Account</h4>
+        </div>
+        <div class="card-body">
+            <form method="POST">
+                {% csrf_token %}
+                
+                <div class="mb-3">
+                    <label class="form-label">Capital Name</label>
+                    {{ form.capital_name }}
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Demat Number (BOID)</label>
+                    {{ form.demat_number }}
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Owner Name</label>
+                    {{ form.owner_name }}
+                </div>
+
+                <div class="d-flex justify-content-between mt-4">
+                    <a href="{% url 'my_portfolio:manage_demat_accounts' %}" class="btn btn-secondary">Cancel</a>
+                    <button type="submit" class="btn btn-success">Update Details</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
