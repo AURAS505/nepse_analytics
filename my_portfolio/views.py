@@ -58,7 +58,7 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.styles import getSampleStyleSheet
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
-from .utils import _get_valuation_data
+from .utils import _get_valuation_data, dictfetchall, fmt_currency_short
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.pagesizes import A4
@@ -77,17 +77,29 @@ def dictfetchall(cursor):
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 def fmt_currency_short(value):
+    """
+    Formats currency with C (Crore), L (Lakh), T (Thousand), and A (Arba).
+    """
     if value is None: return "-"
     try:
         val = Decimal(str(value))
     except:
         return value
     if val == 0: return "-"
+    
     abs_val = abs(val)
-    if abs_val >= 10000000: return f"{val/10000000:.2f}C"
-    elif abs_val >= 100000: return f"{val/100000:.2f}L"
-    elif abs_val >= 1000:   return f"{val/1000:.2f}T"
-    else: return f"{val:,.0f}"
+    
+    # --- NEW: Arba Logic (1 Arba = 100 Crores = 1,000,000,000) ---
+    if abs_val >= 1000000000: 
+        return f"{val/1000000000:.2f}A"
+    elif abs_val >= 10000000: 
+        return f"{val/10000000:.2f}C"
+    elif abs_val >= 100000: 
+        return f"{val/100000:.2f}L"
+    elif abs_val >= 1000:   
+        return f"{val/1000:.2f}T"
+    else: 
+        return f"{val:,.0f}"
 
 # ### --- THIS IS THE FULLY CORRECTED VALUATION FUNCTION --- ###
 def _get_valuation_data(start_date, end_date):
@@ -378,6 +390,77 @@ def get_fundamental_metrics(symbol_list):
             metrics_map[sym]['four_week_change'] = 0
 
     return metrics_map
+
+
+def _get_broker_ledger_data(broker_no, sort='asc'):
+    cash_txns = BrokerTransaction.objects.filter(
+        broker__broker_no=broker_no
+    ).order_by('date', 'created_at')
+
+    ob_entries = cash_txns.filter(action='Balance b/d')
+    other_cash_txns = cash_txns.exclude(action='Balance b/d')
+    opening_balance = ob_entries.aggregate(Sum('amount'))['amount__sum'] or Decimal('0.0')
+
+    stock_txns = Transaction.objects.filter(
+        broker=str(broker_no) 
+    ).select_related('symbol').order_by('date', 'created_at')
+
+    all_entries = []
+    
+    for txn in other_cash_txns:
+        amount = txn.amount
+        is_debit = False
+        if txn.action in ['Receipt', 'Misc(+)']: is_debit = True
+        all_entries.append({
+            'date': txn.date,
+            'description': f"{txn.get_action_display()} - {txn.remarks or ''}",
+            'source': 'CASH',
+            'debit': amount if is_debit else Decimal('0.00'),
+            'credit': abs(amount) if not is_debit else Decimal('0.00')
+        })
+
+    for txn in stock_txns:
+        amount = txn.billed_amount or Decimal('0.0')
+        if txn.transaction_type in ['SALE', 'CONVERSION(-)', 'SUSPENSE(-)']:
+            all_entries.append({
+                'date': txn.date,
+                'description': f"Stock {txn.transaction_type} of {txn.symbol.script_ticker} ({txn.kitta} kitta)",
+                'source': 'STOCK', 'debit': amount, 'credit': Decimal('0.00')
+            })
+        elif txn.transaction_type in ['BUY', 'IPO', 'RIGHT', 'CONVERSION(+)', 'SUSPENSE(+)']:
+            all_entries.append({
+                'date': txn.date,
+                'description': f"Stock {txn.transaction_type} of {txn.symbol.script_ticker} ({txn.kitta} kitta)",
+                'source': 'STOCK', 'debit': Decimal('0.00'), 'credit': amount
+            })
+        elif txn.transaction_type == 'CASH':
+             all_entries.append({
+                'date': txn.date,
+                'description': f"Cash Dividend for {txn.symbol.script_ticker}",
+                'source': 'STOCK', 'debit': amount, 'credit': Decimal('0.00')
+            })
+            
+    all_entries.sort(key=lambda x: x['date'], reverse=(sort == 'desc'))
+
+    running_balance = opening_balance
+    total_debit = Decimal('0.00')
+    total_credit = Decimal('0.00')
+    ledger = []
+
+    for entry in all_entries:
+        running_balance += entry['debit'] - entry['credit']
+        total_debit += entry['debit']
+        total_credit += entry['credit']
+        entry['running_balance'] = running_balance
+        ledger.append(entry)
+
+    return {
+        'opening_balance': opening_balance,
+        'ledger': ledger,
+        'total_debit': total_debit,
+        'total_credit': total_credit,
+        'final_balance': running_balance
+    }
 
 # ### --- END OF FIXED FUNCTION --- ###
 # --- STANDARD VIEWS ---
@@ -1049,27 +1132,18 @@ def sync_dividend_transactions(request):
         return JsonResponse({"message": f"An unexpected error occurred: {str(e)}"}, status=500)
 # --- END NEW VIEW ---
 
+# my_portfolio/views.py
+
 @login_required
 def company_dashboard(request):
-    # (This view is correct and remains unchanged)
+    # 1. Fetch Prices
     latest_prices = {}
     with connection.cursor() as cursor:
         try:
-            cursor.execute("""
-                WITH RankedPrices AS (
-                    SELECT symbol, close_price, business_date,
-                        ROW_NUMBER() OVER(PARTITION BY symbol ORDER BY business_date DESC) as rn
-                    FROM stock_prices
-                )
-                SELECT symbol, close_price, business_date FROM RankedPrices WHERE rn = 1;
-            """)
+            cursor.execute("WITH RankedPrices AS (SELECT symbol, close_price, business_date, ROW_NUMBER() OVER(PARTITION BY symbol ORDER BY business_date DESC) as rn FROM stock_prices) SELECT symbol, close_price, business_date FROM RankedPrices WHERE rn = 1;")
             for row in dictfetchall(cursor):
-                latest_prices[row['symbol']] = {
-                    'close_price': row.get('close_price') or Decimal('0.0'),
-                    'business_date': row.get('business_date')
-                }
-        except Exception as e:
-            print(f"Error fetching latest prices: {e}")
+                latest_prices[row['symbol']] = {'close_price': row.get('close_price') or Decimal('0.0'), 'business_date': row.get('business_date')}
+        except Exception as e: print(f"Error fetching latest prices: {e}")
     
     overall_stats, holdings_summary_list = {}, []
     all_transactions = [] 
@@ -1080,11 +1154,54 @@ def company_dashboard(request):
             all_transactions = dictfetchall(cursor) 
         
         overall_stats, holdings_summary_list = calculate_overall_portfolio(all_transactions, latest_prices)
-    except Exception as e:
-        messages.error(request, f"Could not calculate portfolio stats: {e}")
+    except Exception as e: messages.error(request, f"Could not calculate portfolio stats: {e}")
     
     symbol = request.GET.get('symbol')
     company_info, detailed_calculations, summary_data = None, [], None
+    
+    # --- NEW VARIABLES FOR SIDEBAR ---
+    demat_summary = []
+    broker_summary = []
+    transit_qty = 0
+    latest_snapshot_date = None
+    latest_broker_date = None
+
+    # ============================================================
+    # 1. GLOBAL: BROKER SUMMARY (CALCULATE ALWAYS)
+    # ============================================================
+    try:
+        # Get IDs from Stock Transactions (Global)
+        stock_broker_ids = set(Transaction.objects.values_list('broker', flat=True).distinct())
+        # Get IDs from Cash Transactions (Global)
+        cash_broker_ids = set(BrokerTransaction.objects.values_list('broker__broker_no', flat=True).distinct())
+        
+        # Combine all unique broker IDs
+        all_broker_ids = stock_broker_ids.union({str(x) for x in cash_broker_ids})
+        valid_brokers = sorted([b for b in all_broker_ids if b and b.strip().isdigit()], key=lambda x: int(x))
+        
+        max_date_found = None
+        
+        for b_id in valid_brokers:
+            try:
+                ledger_res = _get_broker_ledger_data(int(b_id))
+                bal = ledger_res['final_balance']
+                
+                if ledger_res['ledger']:
+                    ld = ledger_res['ledger'][-1]['date']
+                    if max_date_found is None or ld > max_date_found:
+                        max_date_found = ld
+                
+                broker_summary.append({'no': b_id, 'balance': bal})
+            except Exception as e:
+                print(f"Error calculating ledger for broker {b_id}: {e}")
+        
+        latest_broker_date = max_date_found
+    except Exception as e:
+        print(f"Error in broker summary: {e}")
+
+    # ============================================================
+    # 2. SYMBOL SPECIFIC LOGIC (ONLY IF SEARCHED)
+    # ============================================================
     if symbol:
         try:
             symbol_txns = [txn for txn in all_transactions if txn['symbol_id'] == symbol]
@@ -1093,6 +1210,44 @@ def company_dashboard(request):
                 company_info = {'symbol': symbol, 'script': symbol_txns[0]['script'], 'sector': symbol_txns[0]['sector']}
                 price_info = latest_prices.get(symbol, {})
                 detailed_calculations, summary_data = calculate_pma_details(symbol_txns, price_info)
+                
+                # --- A. CALCULATE TRANSIT ---
+                today = date.today()
+                wd = today.weekday()
+                start_d, end_d = None, None
+                
+                if wd == 6: start_d = end_d = today - timedelta(days=3) # Sun -> Thu
+                elif wd == 0: start_d = end_d = today - timedelta(days=1) # Mon -> Sun
+                elif wd == 1: start_d = today - timedelta(days=2); end_d = today - timedelta(days=1)
+                elif wd == 2: start_d = today - timedelta(days=2); end_d = today - timedelta(days=1)
+                elif wd == 3: start_d = today - timedelta(days=2); end_d = today - timedelta(days=1)
+                elif wd == 4: start_d = today - timedelta(days=2); end_d = today - timedelta(days=1)
+                elif wd == 5: start_d = today - timedelta(days=3); end_d = today - timedelta(days=2)
+                
+                if start_d and end_d:
+                    transit_qty = Transaction.objects.filter(
+                        symbol__script_ticker=symbol,
+                        transaction_type='BUY',
+                        date__range=[start_d, end_d]
+                    ).aggregate(t=Sum('kitta'))['t'] or 0
+
+                # --- B. DEMAT SUMMARY (Specific to Symbol) ---
+                latest_snapshot_date = MeroShareHolding.objects.aggregate(Max('snapshot_date'))['snapshot_date__max']
+                if latest_snapshot_date:
+                    holdings = MeroShareHolding.objects.filter(
+                        symbol__script_ticker=symbol, 
+                        snapshot_date=latest_snapshot_date
+                    ).select_related('demat_account')
+                    
+                    for h in holdings:
+                        short_name = " ".join(h.demat_account.capital_name.split()[:3])
+                        demat_summary.append({
+                            'dp_name': short_name,
+                            'cb': h.current_balance,
+                            'pb': h.pledge_balance,
+                            'free': h.free_balance
+                        })
+
         except Exception as e:
              messages.error(request, f"Could not generate report for {symbol}: {e}")
     
@@ -1102,9 +1257,15 @@ def company_dashboard(request):
         'company': company_info, 
         'details': detailed_calculations, 
         'summary': summary_data,
-        'current_symbol': symbol
+        'current_symbol': symbol,
+        'demat_summary': demat_summary,
+        'demat_snapshot_date': latest_snapshot_date,
+        'transit_qty': transit_qty,
+        'broker_summary': broker_summary,
+        'broker_last_date': latest_broker_date,
     }
     return render(request, 'my_portfolio/company_dashboard.html', context)
+
 
 
 @login_required
@@ -1736,75 +1897,6 @@ def get_broker_rp_entries(broker_no):
         
     return rp_entries
 
-def _get_broker_ledger_data(broker_no, sort='asc'):
-    cash_txns = BrokerTransaction.objects.filter(
-        broker__broker_no=broker_no
-    ).order_by('date', 'created_at')
-
-    ob_entries = cash_txns.filter(action='Balance b/d')
-    other_cash_txns = cash_txns.exclude(action='Balance b/d')
-    opening_balance = ob_entries.aggregate(Sum('amount'))['amount__sum'] or Decimal('0.0')
-
-    stock_txns = Transaction.objects.filter(
-        broker=str(broker_no) 
-    ).select_related('symbol').order_by('date', 'created_at')
-
-    all_entries = []
-    
-    for txn in other_cash_txns:
-        amount = txn.amount
-        is_debit = False
-        if txn.action in ['Receipt', 'Misc(+)']: is_debit = True
-        all_entries.append({
-            'date': txn.date,
-            'description': f"{txn.get_action_display()} - {txn.remarks or ''}",
-            'source': 'CASH',
-            'debit': amount if is_debit else Decimal('0.00'),
-            'credit': abs(amount) if not is_debit else Decimal('0.00')
-        })
-
-    for txn in stock_txns:
-        amount = txn.billed_amount or Decimal('0.0')
-        if txn.transaction_type in ['SALE', 'CONVERSION(-)', 'SUSPENSE(-)']:
-            all_entries.append({
-                'date': txn.date,
-                'description': f"Stock {txn.transaction_type} of {txn.symbol.script_ticker} ({txn.kitta} kitta)",
-                'source': 'STOCK', 'debit': amount, 'credit': Decimal('0.00')
-            })
-        elif txn.transaction_type in ['BUY', 'IPO', 'RIGHT', 'CONVERSION(+)', 'SUSPENSE(+)']:
-            all_entries.append({
-                'date': txn.date,
-                'description': f"Stock {txn.transaction_type} of {txn.symbol.script_ticker} ({txn.kitta} kitta)",
-                'source': 'STOCK', 'debit': Decimal('0.00'), 'credit': amount
-            })
-        elif txn.transaction_type == 'CASH':
-             all_entries.append({
-                'date': txn.date,
-                'description': f"Cash Dividend for {txn.symbol.script_ticker}",
-                'source': 'STOCK', 'debit': amount, 'credit': Decimal('0.00')
-            })
-            
-    all_entries.sort(key=lambda x: x['date'], reverse=(sort == 'desc'))
-
-    running_balance = opening_balance
-    total_debit = Decimal('0.00')
-    total_credit = Decimal('0.00')
-    ledger = []
-
-    for entry in all_entries:
-        running_balance += entry['debit'] - entry['credit']
-        total_debit += entry['debit']
-        total_credit += entry['credit']
-        entry['running_balance'] = running_balance
-        ledger.append(entry)
-
-    return {
-        'opening_balance': opening_balance,
-        'ledger': ledger,
-        'total_debit': total_debit,
-        'total_credit': total_credit,
-        'final_balance': running_balance
-    }
 
 @login_required
 def broker_ledger_report(request):
@@ -2276,29 +2368,26 @@ def sp_report(request):
     }
     return render(request, 'my_portfolio/sp_report.html', context)
 
+# my_portfolio/views.py
+
+# ... [Keep imports and helper functions unchanged] ...
+
+@login_required
 def portfolio_watch(request):
     # --- 1. Get Current NEPSE Index ---
     current_index_val = Decimal('0.0')
     latest_index_date = None
-    
     try:
         index_obj = Indices.objects.filter(sector__icontains='NEPSE').order_by('-date').first()
         if index_obj:
             current_index_val = index_obj.close
             latest_index_date = index_obj.date
     except Exception as e:
-        print(f"Error fetching index: {e}")
         current_index_val = Decimal('2700.00')
 
     # --- 2. Handle User Input ---
     expected_index_input = request.GET.get('expected_index')
-    if expected_index_input:
-        try:
-            expected_index_val = Decimal(expected_index_input)
-        except:
-            expected_index_val = current_index_val
-    else:
-        expected_index_val = current_index_val
+    expected_index_val = Decimal(expected_index_input) if expected_index_input else current_index_val
 
     # --- 3. Calculate Market Change % ---
     market_change_pct = Decimal('0.0')
@@ -2307,80 +2396,54 @@ def portfolio_watch(request):
 
     # --- 4. Fetch Metadata Dates ---
     beta_updated_date = None
-    portfolio_updated_date = None # <--- NEW VARIABLE
-    
+    portfolio_updated_date = None 
     try:
-        # Beta Date
         beta_updated_date = CompanyMetrics.objects.filter(metric_item='Beta Weekly').aggregate(Max('business_date'))['business_date__max']
-        
-        # Portfolio Updated Date (Last Transaction Date) <--- NEW LOGIC
         last_txn = Transaction.objects.order_by('-date').first()
-        if last_txn:
-            portfolio_updated_date = last_txn.date
-        else:
-            portfolio_updated_date = date.today()
-            
-    except:
-        pass
+        portfolio_updated_date = last_txn.date if last_txn else date.today()
+    except: pass
 
     # --- 5. Fetch Portfolio Data ---
-    try:
-        latest_prices = {}
-        with connection.cursor() as cursor:
-            cursor.execute("""
-                WITH RankedPrices AS (
-                    SELECT symbol, close_price, business_date,
-                        ROW_NUMBER() OVER(PARTITION BY symbol ORDER BY business_date DESC) as rn
-                    FROM stock_prices
-                )
-                SELECT symbol, close_price, business_date FROM RankedPrices WHERE rn = 1;
-            """)
-            for row in dictfetchall(cursor):
-                latest_prices[row['symbol']] = {
-                    'close_price': row.get('close_price') or Decimal('0.0'),
-                    'business_date': row.get('business_date')
-                }
+    latest_prices = {}
+    with connection.cursor() as cursor:
+        cursor.execute("WITH RankedPrices AS (SELECT symbol, close_price, business_date, ROW_NUMBER() OVER(PARTITION BY symbol ORDER BY business_date DESC) as rn FROM stock_prices) SELECT symbol, close_price, business_date FROM RankedPrices WHERE rn = 1;")
+        for row in dictfetchall(cursor):
+            latest_prices[row['symbol']] = {'close_price': row.get('close_price') or Decimal('0.0')}
 
-        with connection.cursor() as cursor:
-            cursor.execute("SELECT * FROM my_portfolio_transaction ORDER BY symbol_id, date, created_at")
-            all_transactions = dictfetchall(cursor)
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT * FROM my_portfolio_transaction ORDER BY symbol_id, date, created_at")
+        all_transactions = dictfetchall(cursor)
 
-        _, holdings_summary_list = calculate_overall_portfolio(all_transactions, latest_prices)
-        held_symbols = [h['symbol'] for h in holdings_summary_list]
-        fundamental_data = get_fundamental_metrics(held_symbols)
-
-    except Exception as e:
-        messages.error(request, f"Error loading data: {e}")
-        holdings_summary_list = []
-        fundamental_data = {}
+    _, holdings_summary_list = calculate_overall_portfolio(all_transactions, latest_prices)
+    held_symbols = [h['symbol'] for h in holdings_summary_list]
+    fundamental_data = get_fundamental_metrics(held_symbols)
 
     # --- 6. Process Data ---
     holdings_summary_list.sort(key=lambda x: (x.get('sector', ''), x['symbol']))
 
-    sector_data = defaultdict(lambda: {
-        'rows': [], 'total_cost': Decimal('0.0'), 'total_value': Decimal('0.0'), 
-        'total_forecast_value': Decimal('0.0'), 'total_max_loss_1w': Decimal('0.0'), 'total_max_loss_1m': Decimal('0.0')
-    })
-    
-    grand_total = {
-        'cost': Decimal('0.0'), 'value': Decimal('0.0'), 'forecast_value': Decimal('0.0'),
-        'max_loss_1w': Decimal('0.0'), 'max_loss_1m': Decimal('0.0')
-    }
+    sector_data = defaultdict(lambda: {'rows': [], 'total_value': Decimal('0.0'), 'total_forecast_value': Decimal('0.0'), 'total_max_loss_1w': Decimal('0.0'), 'total_max_loss_1m': Decimal('0.0')})
+    grand_total = {'cost': Decimal('0.0'), 'value': Decimal('0.0'), 'forecast_value': Decimal('0.0'), 'max_loss_1w': Decimal('0.0'), 'max_loss_1m': Decimal('0.0')}
 
     sn_counter = 1
     for h in holdings_summary_list:
         symbol = h['symbol']
         metrics = fundamental_data.get(symbol, {})
-        
-        beta_val = metrics.get('beta')
-        beta = Decimal(str(beta_val)) if beta_val is not None else Decimal('1.0')
+        beta = Decimal(str(metrics.get('beta'))) if metrics.get('beta') is not None else Decimal('1.0')
         
         stock_change_pct = beta * market_change_pct
-        ltp = h['ltp']
-        forecast_price = ltp * (Decimal('1.0') + stock_change_pct)
         
+        ltp = h['ltp']
+        wacc = h['wacc']
         closing_qty = h['closing_kitta']
-        market_val = ltp * closing_qty
+
+        # --- LOGIC FIX: Use WACC if LTP is not available (0) ---
+        price_used = ltp if ltp > 0 else wacc
+        
+        # Recalculate Market Value based on the price_used
+        market_val = price_used * closing_qty
+        
+        # Forecast uses the price_used as the base
+        forecast_price = price_used * (Decimal('1.0') + stock_change_pct)
         forecast_val = forecast_price * closing_qty
 
         var_1w = Decimal(str(metrics.get('var_1w') or 0))
@@ -2390,16 +2453,21 @@ def portfolio_watch(request):
 
         row = {
             'sn': sn_counter, 'symbol': symbol, 'script': h['script'],
-            'kitta': closing_qty, 'wacc': h['wacc'], 'ltp': ltp, 'market_val': market_val,
-            'beta': beta, 'forecast_price': forecast_price, 'forecast_val': forecast_val,
-            'forecast_diff': forecast_val - market_val, 'forecast_pct_change': stock_change_pct * 100,
+            'kitta': closing_qty, 
+            'wacc': wacc, 
+            'ltp': price_used, # Display the price used (LTP or WACC)
+            'market_val': market_val,
+            'beta': beta, 
+            'forecast_price': forecast_price, 
+            'forecast_val': forecast_val,
+            'forecast_diff': forecast_val - market_val,
             'var_1w': var_1w, 'max_loss_1w': max_loss_1w, 'var_1m': var_1m, 'max_loss_1m': max_loss_1m
         }
         sn_counter += 1
         sec = h['sector']
         sector_data[sec]['rows'].append(row)
         
-        sector_data[sec]['total_cost'] += h['book_value']
+        # Accumulate
         sector_data[sec]['total_value'] += market_val
         sector_data[sec]['total_forecast_value'] += forecast_val
         sector_data[sec]['total_max_loss_1w'] += max_loss_1w
@@ -2417,18 +2485,33 @@ def portfolio_watch(request):
     grand_total['forecast_diff'] = grand_total['forecast_value'] - grand_total['value']
     sorted_sector_data = dict(sorted(sector_data.items()))
 
+    # --- 7. Metrics Calculation ---
+    paper_pl = grand_total['value'] - grand_total['cost']
+    exp_val = grand_total['forecast_value']
+    exp_paper_pl = exp_val - grand_total['cost']
+
+    summary_metrics = {
+        'cost': fmt_currency_short(grand_total['cost']),
+        'value': fmt_currency_short(grand_total['value']),
+        'paper_pl': fmt_currency_short(paper_pl),
+        'exp_val': fmt_currency_short(exp_val),
+        'exp_paper_pl': fmt_currency_short(exp_paper_pl),
+        'loss_1w': fmt_currency_short(grand_total['max_loss_1w']),
+        'loss_1m': fmt_currency_short(grand_total['max_loss_1m']),
+    }
+
     context = {
         'current_index': current_index_val,
         'latest_index_date': latest_index_date,
         'beta_updated_date': beta_updated_date,
-        'portfolio_updated_date': portfolio_updated_date, # <--- Passed to template
+        'portfolio_updated_date': portfolio_updated_date,
         'expected_index': expected_index_val,
         'market_change_pct': market_change_pct * 100,
         'sector_data': sorted_sector_data,
-        'grand_total': grand_total
+        'grand_total': grand_total,
+        'summary_metrics': summary_metrics, 
     }
     return render(request, 'my_portfolio/portfolio_watch.html', context)
-
 
 @login_required
 def download_portfolio_watch(request):
@@ -3408,5 +3491,5 @@ def generate_trading_sheet(request):
         return response
     
 
-    
+
 #end

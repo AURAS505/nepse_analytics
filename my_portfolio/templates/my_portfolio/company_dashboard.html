@@ -41,23 +41,23 @@
         <button type="button" class="btn btn-info ms-1" data-bs-toggle="modal" data-bs-target="#holdingsListModal" title="View All Holdings">
             <i class="bi bi-list-task"></i>
         </button>
-
       </div>
     </form>
   </div>
 </div>
 
 <div class="row g-4">
+  
   <div class="col-lg-9">
     {% if summary and company %}
-    <div class="card shadow-sm border-0 h-100">
+    
+    <div id="transactionCard" class="card shadow-sm border-0 d-flex flex-column">
       <div class="card-header bg-primary-subtle fw-semibold text-dark">
         <i class="bi bi-list-columns"></i> Transaction Details
       </div>
       
-      <div class="table-responsive" style="max-height: 750px; overflow-y: auto;">
+      <div class="table-responsive flex-grow-1" style="overflow-y: auto;">
         <table class="table table-hover table-bordered table-sm mb-0 align-middle" style="font-size: 0.95rem;">
-          
           <thead class="table-primary text-center" style="position: sticky; top: 0; z-index: 10; box-shadow: 0 2px 2px -1px rgba(0, 0, 0, 0.2);">
             <tr>
               <th>Unique ID</th>
@@ -75,15 +75,7 @@
           <tbody>
             {% if details %}
               {% for row in details|dictsortreversed:"date" %}
-                <tr class="
-                  {% if row.type == 'BUY' or row.type == 'CONVERSION(+)' or row.type == 'SUSPENSE(+)' %}
-                    table-success
-                  {% elif row.type == 'SALE' or row.type == 'CONVERSION(-)' or row.type == 'SUSPENSE(-)' %}
-                    table-danger
-                  {% else %}
-                    bg-white
-                  {% endif %}
-                ">
+                <tr class="{% if row.type == 'BUY' or row.type == 'CONVERSION(+)' or row.type == 'SUSPENSE(+)' %}table-success{% elif row.type == 'SALE' or row.type == 'CONVERSION(-)' or row.type == 'SUSPENSE(-)' %}table-danger{% else %}bg-white{% endif %}">
                   <td><span class="badge bg-secondary">{{ row.unique_id }}</span></td>
                   <td>{{ row.date|date:"Y-m-d" }}</td>
                   <td>{{ row.type }}</td>
@@ -120,9 +112,10 @@
   </div> 
 
   <div class="col-lg-3">
-    <div class="d-flex flex-column gap-4">
+    <div id="sidebarContent" class="d-flex flex-column gap-4">
       
       {% if summary and company %}
+      
       <div class="card border-0">
         <div class="card-header bg-info-subtle fw-semibold text-dark">
           <i class="bi bi-cash-stack"></i> Cost Summary
@@ -158,6 +151,41 @@
               </tr>
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <div class="card border-0 shadow-sm">
+        <div class="card-header bg-warning-subtle fw-semibold text-dark">
+            <i class="bi bi-wallet2"></i> DEMAT Summary
+            <div class="text-muted small fw-normal" style="font-size: 0.7em;">
+                As on {{ demat_snapshot_date|date:"Y-m-d"|default:"-" }}
+            </div>
+        </div>
+        <div class="card-body p-2" style="font-size: 0.85rem;">
+            {% for dp in demat_summary %}
+            <div class="mb-2 border-bottom pb-2">
+                <div class="fw-bold text-primary mb-1">{{ dp.dp_name }}</div>
+                <div class="d-flex justify-content-between">
+                    <span class="text-muted">Current Bal:</span> 
+                    <span class="fw-semibold">{{ dp.cb|intcomma }}</span>
+                </div>
+                <div class="d-flex justify-content-between">
+                    <span class="text-muted">Pledge Bal:</span> 
+                    <span>{{ dp.pb|intcomma }}</span>
+                </div>
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted">Free Balance:</span> 
+                    <span class="fw-bold text-success fs-5">{{ dp.free|intcomma }}</span>
+                </div>
+            </div>
+            {% empty %}
+            <div class="text-center text-muted small py-2">No Demat records found.</div>
+            {% endfor %}
+            
+            <div class="d-flex justify-content-between mt-1 pt-1">
+                <span>Stock In-Transit:</span> 
+                <span class="fw-bold text-info">{{ transit_qty|intcomma }}</span>
+            </div>
         </div>
       </div>
 
@@ -202,10 +230,50 @@
               Rs. {{ summary.cash_dividend|floatformat:2|intcomma }}
             </span>
           </div>
-          
         </div>
       </div>
-      {% endif %}
+      
+      {% endif %} 
+      <div class="card border-0 shadow-sm">
+        <div class="card-header bg-secondary-subtle fw-semibold text-dark">
+            <i class="bi bi-bank"></i> Broker Closing Summary
+            <div class="text-muted small fw-normal" style="font-size: 0.7em;">
+                As on {{ broker_last_date|date:"Y-m-d"|default:"-" }}
+            </div>
+        </div>
+        <div class="card-body p-0">
+            <table class="table table-sm table-striped mb-0" style="font-size: 0.85rem;">
+                <thead class="table-light">
+                    <tr>
+                        <th class="ps-3">Broker No.</th>
+                        <th class="text-end pe-3">Cl. Balance</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for b in broker_summary %}
+                    <tr>
+                        <td class="ps-3 fw-semibold">{{ b.no }}</td>
+                        <td class="text-end pe-3 fw-bold {% if b.balance < 0 %}text-danger{% else %}text-success{% endif %}">
+                            {{ b.balance|floatformat:2|intcomma }}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="2" class="text-center text-muted py-2">No broker data.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+      </div>
+
+      <div class="card border-0 shadow-sm">
+        <div class="card-header bg-danger-subtle fw-semibold text-dark">
+            <i class="bi bi-credit-card-2-front"></i> Loan Details
+        </div>
+        <div class="card-body text-center py-4">
+            <i class="bi bi-cone-striped display-6 text-muted opacity-50"></i>
+            <div class="small text-muted mt-2">Feature Coming Soon</div>
+        </div>
+      </div>
 
       <div class="card border-0 shadow-sm">
         <div class="card-header bg-dark text-white fw-semibold">
@@ -257,9 +325,7 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
       <div class="modal-body">
-        
         <input type="text" class="form-control mb-3" id="modalSearch" onkeyup="filterHoldingsList()" placeholder="Type to filter list...">
-
         <div class="table-responsive">
           <table class="table table-sm table-striped table-bordered table-hover" id="holdingsTable" style="font-size: 0.85rem;">
             <thead class="table-light text-center align-middle">
@@ -286,16 +352,13 @@
                     <div class="text-muted small">{{ item.script }}</div>
                   </td>
                   <td class="text-end align-middle">{{ item.closing_kitta|intcomma }}</td>
-                  
                   <td class="text-end align-middle">
                     <div class="fw-semibold">{{ item.book_value|floatformat:2|intcomma }}</div>
                     <div class="text-muted small" style="font-size: 0.75rem;">({{ item.book_value_pct|floatformat:2 }}%)</div>
                   </td>
-                  
                   <td class="text-end align-middle">{{ item.wacc|floatformat:2|intcomma }}</td>
                   <td class="text-end align-middle text-primary">{{ item.bep|floatformat:2|intcomma }}</td>
                   <td class="text-end align-middle">{{ item.ltp|floatformat:2|intcomma }}</td>
-                  
                   <td class="text-end align-middle {% if item.realized_pl > 0 %}text-success{% elif item.realized_pl < 0 %}text-danger{% endif %}">
                     {{ item.realized_pl|floatformat:2|intcomma }}
                   </td>
@@ -323,7 +386,6 @@
 
 {% block extra_js %}
 <script>
-// ... (Previous sorting logic script) ...
 let sortDirections = {};
 
 function sortTable(tableId, colIndex, type) {
@@ -336,7 +398,6 @@ function sortTable(tableId, colIndex, type) {
   const newDirection = currentDirection === 'asc' ? 'desc' : 'asc';
   
   const parseNumber = (s) => {
-    // Remove currency symbols, commas, and extract the main number before any parentheses (for percentages)
     s = String(s).replace(/,/g, '').replace('Rs. ', '').split('(')[0]; 
     if (s.trim() === '-') return 0;
     return parseFloat(s) || 0;
@@ -373,10 +434,8 @@ function sortTable(tableId, colIndex, type) {
   
   sortDirections[directionKey] = newDirection;
 }
-</script>
-<script>
+
 function filterHoldingsList() {
-// ... (Filter logic) ...
   const input = document.getElementById("modalSearch");
   const filter = input.value.toUpperCase();
   const table = document.getElementById("holdingsTable");
@@ -391,11 +450,26 @@ function filterHoldingsList() {
     }
   }
 }
+
+// Match heights script
+function matchPanelHeights() {
+    const sidebar = document.getElementById('sidebarContent');
+    const txnCard = document.getElementById('transactionCard');
+    
+    if (window.innerWidth >= 992 && sidebar && txnCard) {
+        const rightHeight = sidebar.offsetHeight;
+        txnCard.style.height = rightHeight + 'px';
+    } else if (txnCard) {
+        txnCard.style.height = 'auto';
+        txnCard.style.maxHeight = '600px'; 
+    }
+}
+window.addEventListener('load', matchPanelHeights);
+window.addEventListener('resize', matchPanelHeights);
 </script>
 
 {% if summary %}
 <script>
-// ... (Single Stock Calculator) ...
 function calculateUnrealized() {
   const marketPrice = parseFloat(document.getElementById('marketPrice').value);
   const realizedPL = parseFloat('{{ summary.realized_pl|default:0 }}');
