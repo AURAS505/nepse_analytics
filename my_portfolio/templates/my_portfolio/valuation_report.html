@@ -33,37 +33,42 @@
 {% block content %}
 <div id="controlCard" class="card shadow-sm mb-4 sticky-top-card">
     <div class="card-header">
-        <form method="GET" class="row g-3 align-items-center">
+        <form method="GET" class="row g-2 align-items-center">
             <div class="col-md-1">
                 <a href="{% url 'my_portfolio:portfolio_home' %}" class="btn btn-outline-secondary btn-sm w-100" title="Back to Dashboard">
                     <i class="bi bi-arrow-left"></i> Back
                 </a>
             </div>
 
-            <div class="col-md-3">
-                <label for="start_date" class="form-label small fw-bold visually-hidden">Start Date</label>
+            <div class="col-md-2">
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                    <input type="text" class="form-control" id="tableSearch" placeholder="Search Symbol..." onkeyup="filterValuationTable()">
+                </div>
+            </div>
+
+            <div class="col-md-2">
                 <div class="input-group input-group-sm">
                     <span class="input-group-text">Start</span>
                     <input type="date" class="form-control" id="start_date" name="start_date" value="{{ start_date|date:'Y-m-d' }}">
                 </div>
             </div>
-            <div class="col-md-3">
-                <label for="end_date" class="form-label small fw-bold visually-hidden">End Date</label>
+            <div class="col-md-2">
                 <div class="input-group input-group-sm">
                     <span class="input-group-text">End</span>
                     <input type="date" class="form-control" id="end_date" name="end_date" value="{{ end_date|date:'Y-m-d' }}">
                 </div>
             </div>
+
             <div class="col-md-2">
-                <label for="report_type" class="form-label small fw-bold visually-hidden">Type</label>
                 <select name="report_type" id="report_type" class="form-select form-select-sm">
-                    <option value="normal" {% if report_type == 'normal' %}selected{% endif %}>Normal Valuation</option>
+                    <option value="normal" {% if report_type == 'normal' %}selected{% endif %}>Valuation (Mkt &rarr; Mkt)</option>
                     <option value="performance" {% if report_type == 'performance' %}selected{% endif %}>Performance</option>
                 </select>
             </div>
+
             <div class="col-md-3 d-flex gap-2">
                 <button type="submit" class="btn btn-primary btn-sm flex-grow-1"><i class="bi bi-filter"></i> Run</button>
-                
                 <a href="{% url 'my_portfolio:download_valuation_report' %}?start_date={{ start_date|date:'Y-m-d' }}&end_date={{ end_date|date:'Y-m-d' }}&report_type={{ report_type }}" class="btn btn-success btn-sm flex-grow-1">
                     <i class="bi bi-file-earmark-excel"></i> Excel
                 </a>
@@ -73,21 +78,19 @@
 </div>
 
 <div class="table-responsive">
-    <table class="table table-sm table-hover table-bordered" style="font-size: 0.8rem;">
+    <table class="table table-sm table-hover table-bordered" id="valTable" style="font-size: 0.8rem;">
         <thead id="tableHeader" class="table-light text-center align-middle sticky-table-header">
             <tr>
                 <th rowspan="2" class="text-start">S.N.</th>
+                
                 <th rowspan="2" class="text-start">Symbol</th>
-                <th rowspan="2" class="text-start" style="min-width: 150px;">Company Name</th>
                 
                 <th colspan="3" class="border-start">
                     {% if report_type == 'performance' %}Op. Stock Sold{% else %}Opening{% endif %}
                 </th>
                 <th colspan="3" class="border-start">Purchase</th>
                 
-                {% if report_type == 'performance' %}
-                    <th colspan="3" class="border-start">Rights</th>
-                {% endif %}
+                <th colspan="3" class="border-start">Rights</th>
                 
                 <th colspan="3" class="border-start">Bonus</th>
                 
@@ -101,7 +104,13 @@
                 
                 <th colspan="2" class="border-start">Performance</th> 
                 <th colspan="3" class="border-start">Closing (Cost)</th>
-                <th colspan="3" class="border-start">Market Valuation</th>
+                
+                {% if report_type == 'performance' %}
+                    <th colspan="4" class="border-start bg-primary-subtle">Market Val (Paper P/L Split)</th>
+                {% else %}
+                    <th colspan="3" class="border-start">Market Valuation</th>
+                {% endif %}
+                
                 <th colspan="3" class="border-start">Net P/L</th> 
             </tr>
             <tr>
@@ -109,9 +118,7 @@
                 
                 <th class="border-start">Qty</th> <th>Rate</th> <th>Amount</th>
                 
-                {% if report_type == 'performance' %}
-                    <th class="border-start">Qty</th> <th>Rate</th> <th>Amount</th>
-                {% endif %}
+                <th class="border-start">Qty</th> <th>Rate</th> <th>Amount</th>
                 
                 <th class="border-start">Qty</th> <th>Rate</th> <th>Amount</th>
                 
@@ -130,7 +137,14 @@
                 
                 <th class="border-start">Qty</th> <th>WACC</th> <th>Cost</th>
                 
-                <th class="border-start">LTP</th> <th>Value</th> <th>Paper P/L</th>
+                {% if report_type == 'performance' %}
+                    <th class="border-start bg-primary-subtle text-dark">LTP</th> 
+                    <th class="bg-primary-subtle text-dark">Value</th>
+                    <th class="bg-primary-subtle text-dark" title="Paper P/L on New Unsold">Paper New</th>
+                    <th class="bg-primary-subtle text-dark" title="Paper P/L on Op Unsold">Paper Op</th>
+                {% else %}
+                    <th class="border-start">LTP</th> <th>Value</th> <th>Paper P/L</th>
+                {% endif %}
                 
                 <th class="border-start">Total Profit</th> <th>Cash Div</th> <th>Total (incl. Div)</th> 
             </tr>
@@ -138,7 +152,7 @@
         <tbody>
             {% for sector, content in valuation_data.items %}
                 <tr class="table-group-divider">
-                    <td colspan="3" class="fw-bold bg-light-subtle text-dark">{{ sector|upper }} - Sub Total</td>
+                    <td colspan="2" class="fw-bold bg-light-subtle text-dark">{{ sector|upper }} - Sub Total</td>
                     
                     {% if report_type == 'performance' %}
                         <td class="text-end fw-bold bg-light-subtle">{{ content.totals.sale_from_op|intcomma }}</td>
@@ -154,11 +168,9 @@
                     <td class="bg-light-subtle"></td>
                     <td class="text-end fw-bold bg-light-subtle">{{ content.totals.buy_amt }}</td>
                     
-                    {% if report_type == 'performance' %}
-                        <td class="text-end fw-bold bg-light-subtle">{{ content.totals.right_kitta|intcomma }}</td>
-                        <td class="bg-light-subtle"></td>
-                        <td class="text-end fw-bold bg-light-subtle">{{ content.totals.right_amt }}</td>
-                    {% endif %}
+                    <td class="text-end fw-bold bg-light-subtle">{{ content.totals.right_kitta|intcomma }}</td>
+                    <td class="bg-light-subtle"></td>
+                    <td class="text-end fw-bold bg-light-subtle">{{ content.totals.right_amt }}</td>
                     
                     <td class="text-end fw-bold bg-light-subtle">{{ content.totals.bonus_kitta|intcomma }}</td>
                     <td class="bg-light-subtle"></td>
@@ -185,9 +197,16 @@
                     <td class="bg-light-subtle"></td>
                     <td class="text-end fw-bold bg-light-subtle">{{ content.totals.cl_cost }}</td>
                     
-                    <td class="bg-light-subtle"></td>
-                    <td class="text-end fw-bold bg-light-subtle">{{ content.totals.market_val }}</td>
-                    <td class="text-end fw-bold bg-light-subtle">{{ content.totals.unrealized_pl }}</td>
+                    {% if report_type == 'performance' %}
+                        <td class="bg-light-subtle"></td>
+                        <td class="text-end fw-bold bg-light-subtle">{{ content.totals.market_val }}</td>
+                        <td class="text-end fw-bold bg-light-subtle">{{ content.totals.paper_pl_new }}</td>
+                        <td class="text-end fw-bold bg-light-subtle">{{ content.totals.paper_pl_op }}</td>
+                    {% else %}
+                        <td class="bg-light-subtle"></td>
+                        <td class="text-end fw-bold bg-light-subtle">{{ content.totals.market_val }}</td>
+                        <td class="text-end fw-bold bg-light-subtle">{{ content.totals.unrealized_pl }}</td>
+                    {% endif %}
                     
                     <td class="text-end fw-bold bg-light-subtle">{{ content.totals.total_pl }}</td>
                     <td class="text-end fw-bold bg-light-subtle">{{ content.totals.cash_dividend }}</td>
@@ -195,12 +214,12 @@
                 </tr>
 
                 {% for row in content.rows %}
-                <tr>
+                <tr class="stock-row">
                     <td class="text-center">{{ row.sn }}</td>
-                    <td class="text-start fw-bold">
-                        <a href="{% url 'my_portfolio:company_dashboard' %}?symbol={{ row.company }}">{{ row.company }}</a>
+                    
+                    <td class="text-start fw-bold symbol-col" data-bs-toggle="tooltip" data-bs-placement="right" title="{{ row.company_name }}">
+                        <a href="{% url 'my_portfolio:company_dashboard' %}?symbol={{ row.company }}" class="text-decoration-none">{{ row.company }}</a>
                     </td>
-                    <td class="text-start">{{ row.company_name }}</td>
                     
                     {% if report_type == 'performance' %}
                         <td class="text-end">{{ row.sale_from_op|intcomma }}</td>
@@ -216,11 +235,9 @@
                     <td class="text-end">{{ row.buy_rate|floatformat:2|intcomma }}</td>
                     <td class="text-end">{{ row.buy_amt }}</td>
                     
-                    {% if report_type == 'performance' %}
-                        <td class="text-end">{{ row.right_kitta|intcomma }}</td>
-                        <td class="text-end">{{ row.right_rate|floatformat:2|intcomma }}</td>
-                        <td class="text-end">{{ row.right_amt }}</td>
-                    {% endif %}
+                    <td class="text-end">{{ row.right_kitta|intcomma }}</td>
+                    <td class="text-end">{{ row.right_rate|floatformat:2|intcomma }}</td>
+                    <td class="text-end">{{ row.right_amt }}</td>
                     
                     <td class="text-end">{{ row.bonus_kitta|intcomma }}</td>
                     <td class="text-end">{{ row.bonus_rate|floatformat:2|intcomma }}</td>
@@ -247,9 +264,16 @@
                     <td class="text-end">{{ row.cl_rate|floatformat:2|intcomma }}</td>
                     <td class="text-end">{{ row.cl_cost }}</td>
                     
-                    <td class="text-end">{{ row.ltp|floatformat:2|intcomma }}</td>
-                    <td class="text-end">{{ row.market_val }}</td>
-                    <td class="text-end {% if row.unrealized_pl.0 == '-' %}text-danger{% else %}text-success{% endif %}">{{ row.unrealized_pl }}</td>
+                    {% if report_type == 'performance' %}
+                        <td class="text-end">{{ row.ltp|floatformat:2|intcomma }}</td>
+                        <td class="text-end">{{ row.market_val }}</td>
+                        <td class="text-end {% if row.paper_pl_new.0 == '-' %}text-danger{% else %}text-success{% endif %} fw-semibold">{{ row.paper_pl_new }}</td>
+                        <td class="text-end {% if row.paper_pl_op.0 == '-' %}text-danger{% else %}text-success{% endif %}">{{ row.paper_pl_op }}</td>
+                    {% else %}
+                        <td class="text-end">{{ row.ltp|floatformat:2|intcomma }}</td>
+                        <td class="text-end">{{ row.market_val }}</td>
+                        <td class="text-end {% if row.unrealized_pl.0 == '-' %}text-danger{% else %}text-success{% endif %}">{{ row.unrealized_pl }}</td>
+                    {% endif %}
                     
                     <td class="text-end fw-bold">{{ row.total_pl }}</td>
                     <td class="text-end">{{ row.cash_dividend }}</td>
@@ -261,7 +285,7 @@
         
         <tfoot class="table-dark" style="position: sticky; bottom: 0; z-index: 2;">
             <tr>
-                <td colspan="3" class="text-start fw-bold">GRAND TOTAL</td>
+                <td colspan="2" class="text-start fw-bold">GRAND TOTAL</td>
                 
                 {% if report_type == 'performance' %}
                     <td class="text-end fw-bold">{{ grand_totals.sale_from_op|intcomma }}</td>
@@ -275,10 +299,8 @@
                 <td class="text-end fw-bold"></td> <td></td>
                 <td class="text-end fw-bold">{{ grand_totals.buy_amt }}</td>
                 
-                {% if report_type == 'performance' %}
-                    <td class="text-end fw-bold"></td> <td></td>
-                    <td class="text-end fw-bold">{{ grand_totals.right_amt }}</td>
-                {% endif %}
+                <td class="text-end fw-bold"></td> <td></td>
+                <td class="text-end fw-bold">{{ grand_totals.right_amt }}</td>
                 
                 <td class="text-end fw-bold"></td> <td></td>
                 <td class="text-end fw-bold">{{ grand_totals.bonus_amt }}</td>
@@ -302,9 +324,16 @@
                 <td class="text-end fw-bold"></td> <td></td>
                 <td class="text-end fw-bold">{{ grand_totals.cl_cost }}</td>
                 
-                <td></td>
-                <td class="text-end fw-bold">{{ grand_totals.market_val }}</td>
-                <td class="text-end fw-bold">{{ grand_totals.unrealized_pl }}</td>
+                {% if report_type == 'performance' %}
+                    <td></td>
+                    <td class="text-end fw-bold">{{ grand_totals.market_val }}</td>
+                    <td class="text-end fw-bold">{{ grand_totals.paper_pl_new }}</td>
+                    <td class="text-end fw-bold">{{ grand_totals.paper_pl_op }}</td>
+                {% else %}
+                    <td></td>
+                    <td class="text-end fw-bold">{{ grand_totals.market_val }}</td>
+                    <td class="text-end fw-bold">{{ grand_totals.unrealized_pl }}</td>
+                {% endif %}
                 
                 <td class="text-end fw-bold">{{ grand_totals.total_pl }}</td>
                 <td class="text-end fw-bold">{{ grand_totals.cash_dividend }}</td>
@@ -317,21 +346,40 @@
 {% block extra_js %}
 <script>
     document.addEventListener("DOMContentLoaded", function() {
+        // 1. Initialize Tooltips
+        var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
+        var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+          return new bootstrap.Tooltip(tooltipTriggerEl)
+        })
+
+        // 2. Sticky Header Logic
         const controlCard = document.getElementById('controlCard');
         const tableHeader = document.getElementById('tableHeader');
-        
         function adjustHeader() {
             if (controlCard && tableHeader) {
                 const height = controlCard.offsetHeight;
                 const ths = tableHeader.querySelectorAll('th');
-                ths.forEach(th => {
-                    th.style.top = height + 'px';
-                });
+                ths.forEach(th => { th.style.top = height + 'px'; });
             }
         }
         adjustHeader();
         window.addEventListener('resize', adjustHeader);
     });
+
+    // 3. Search Function
+    function filterValuationTable() {
+        let input = document.getElementById("tableSearch");
+        let filter = input.value.toUpperCase();
+        let rows = document.querySelectorAll(".stock-row");
+        rows.forEach(row => {
+            let symbol = row.querySelector(".symbol-col").innerText;
+            if (symbol.toUpperCase().indexOf(filter) > -1) {
+                row.style.display = "";
+            } else {
+                row.style.display = "none";
+            }
+        });
+    }
 </script>
 {% endblock %}
 {% endblock %}

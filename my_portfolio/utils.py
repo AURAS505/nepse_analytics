@@ -19,17 +19,20 @@ def fmt_currency_short(value):
         return value
     if val == 0: return "-"
     abs_val = abs(val)
-    if abs_val >= 10000000: return f"{val/10000000:.2f}C"
+    
+    if abs_val >= 1000000000: return f"{val/1000000000:.2f}A"
+    elif abs_val >= 10000000: return f"{val/10000000:.2f}C"
     elif abs_val >= 100000: return f"{val/100000:.2f}L"
     elif abs_val >= 1000:   return f"{val/1000:.2f}T"
     else: return f"{val:,.0f}"
 
 # --- Valuation Logic (Moved from views.py) ---
 
+# ### --- THIS IS THE FULLY CORRECTED VALUATION FUNCTION --- ###
 def _get_valuation_data(start_date, end_date):
     """
-    Calculates the full valuation report, including opening,
-    movements (buy/sale/bonus), and closing balances.
+    Calculates valuation with LIFO logic for Performance Report.
+    Includes splits for Sales, Realized P/L, and Paper (Unrealized) P/L.
     """
     
     # 1. Fetch ALL Transactions up to end_date
@@ -37,7 +40,7 @@ def _get_valuation_data(start_date, end_date):
         date__lte=end_date
     ).select_related('symbol').order_by('symbol__sector', 'symbol__script_ticker', 'date', 'created_at')
 
-    # 2. Fetch Latest Prices using Raw SQL (Efficient for snapshots)
+    # 2. Fetch Latest Prices
     latest_prices = {}
     try:
         with connection.cursor() as cursor:
@@ -58,7 +61,6 @@ def _get_valuation_data(start_date, end_date):
     except Exception as e:
         print(f"Error fetching prices: {e}")
 
-    # 3. Group transactions by symbol
     grouped_txns = defaultdict(list)
     for txn in transactions:
         grouped_txns[txn.symbol].append(txn)
@@ -68,12 +70,12 @@ def _get_valuation_data(start_date, end_date):
     grand_totals = defaultdict(lambda: Decimal('0.0'))
     
     TYPE_OPENING = {'Balance b/d'}
-    TYPE_SIMPLE_PURCHASE = {'BUY', 'CONVERSION(+)', 'SUSPENSE(+)', 'RIGHT', 'IPO'}
-    TYPE_PROPORTIONAL = {'BONUS'} 
+    TYPE_SIMPLE_PURCHASE = {'BUY', 'CONVERSION(+)', 'SUSPENSE(+)', 'IPO'}
+    TYPE_RIGHT = {'RIGHT'} 
+    TYPE_BONUS = {'BONUS'} 
     TYPE_SALES = {'SALE', 'CONVERSION(-)', 'SUSPENSE(-)'}
     TYPE_CASH = {'CASH'}
 
-    # 4. Main Logic Loop
     for symbol_obj, txns in grouped_txns.items():
         row = defaultdict(Decimal)
         row.update({
@@ -85,14 +87,14 @@ def _get_valuation_data(start_date, end_date):
         global_kitta = 0
         global_cost = Decimal('0.0')
         
-        # --- A. Calculate Opening Balance (all txns *before* start_date) ---
+        # --- A. Calculate Opening Balance (Before Start Date) ---
         for txn in txns:
             if txn.date < start_date:
                 t_type = txn.transaction_type
                 kitta = int(txn.kitta or 0)
                 amount = txn.billed_amount if txn.billed_amount else Decimal('0.0')
                 
-                if t_type in TYPE_OPENING or t_type in TYPE_SIMPLE_PURCHASE or t_type in TYPE_PROPORTIONAL:
+                if t_type in TYPE_OPENING or t_type in TYPE_SIMPLE_PURCHASE or t_type in TYPE_BONUS or t_type in TYPE_RIGHT:
                     global_kitta += kitta
                     global_cost += amount
                 elif t_type in TYPE_SALES:
@@ -101,7 +103,7 @@ def _get_valuation_data(start_date, end_date):
                     global_kitta -= kitta
                     global_cost -= cons
                 elif t_type in TYPE_CASH:
-                    row['cash_dividend'] += amount
+                    row['cash_dividend'] = Decimal(0) # Reset for period specific view
 
         row['op_kitta'] = global_kitta
         row['op_amt'] = global_cost
@@ -109,9 +111,14 @@ def _get_valuation_data(start_date, end_date):
 
         period_total_cost = row['op_amt']
         period_total_qty = row['op_kitta']
+        
+        # Track additions for LIFO P/L calculation
+        period_additions_qty = 0 
+        period_additions_cost = Decimal('0.0')
+        
         period_sales = [] 
         
-        # --- B. Calculate Movements (txns *within* date range) ---
+        # --- B. Calculate Movements (Within Date Range) ---
         for txn in txns:
             if txn.date >= start_date:
                 t_type = txn.transaction_type
@@ -122,15 +129,28 @@ def _get_valuation_data(start_date, end_date):
                 if t_type in TYPE_OPENING:
                     row['op_kitta'] += kitta; row['op_amt'] += amount
                     period_total_qty += kitta; period_total_cost += amount
+                    period_additions_qty += kitta
+                    period_additions_cost += amount
                 
                 elif t_type in TYPE_SIMPLE_PURCHASE:
                     row['buy_kitta'] += kitta; row['buy_amt'] += amount
                     period_total_qty += kitta; period_total_cost += amount
+                    period_additions_qty += kitta
+                    period_additions_cost += amount
                 
-                elif t_type in TYPE_PROPORTIONAL:
+                elif t_type in TYPE_RIGHT:
+                    row['right_kitta'] += kitta; row['right_amt'] += amount
+                    period_total_qty += kitta; period_total_cost += amount
+                    period_additions_qty += kitta
+                    period_additions_cost += amount
+
+                elif t_type in TYPE_BONUS:
                     row['bonus_kitta'] += kitta 
                     if amount > 0: row['bonus_amt'] += amount
                     period_total_qty += kitta; period_total_cost += amount
+                    period_additions_qty += kitta
+                    # If bonus has billed_amount, include it
+                    period_additions_cost += amount
                 
                 elif t_type in TYPE_SALES:
                     row['sale_kitta'] += kitta; row['sale_amt'] += amount
@@ -139,7 +159,7 @@ def _get_valuation_data(start_date, end_date):
                 elif t_type in TYPE_CASH:
                     row['cash_dividend'] += amount
 
-        # --- C. Process Sales ---
+        # --- C. Process Sales (Standard WACC Logic for Accounting) ---
         if period_total_qty > 0:
             period_wacc_rate = period_total_cost / Decimal(period_total_qty)
         else:
@@ -160,43 +180,70 @@ def _get_valuation_data(start_date, end_date):
             else:
                 period_wacc_rate = Decimal('0.0')
 
-        # --- D. Calculate Closing Balance ---
+        # --- D. Closing & Rates ---
         row['cl_kitta'] = period_total_qty
         row['cl_cost'] = period_total_cost if period_total_qty > 0 else Decimal('0.0')
         row['cl_rate'] = (row['cl_cost'] / row['cl_kitta']) if row['cl_kitta'] > 0 else Decimal('0.0')
 
-        # --- E. Calculate Rates & Market Value ---
         row['buy_rate'] = (row['buy_amt'] / row['buy_kitta']) if row['buy_kitta'] > 0 else 0
+        row['right_rate'] = (row['right_amt'] / row['right_kitta']) if row['right_kitta'] > 0 else 0
         row['bonus_rate'] = (row['bonus_amt'] / row['bonus_kitta']) if row['bonus_kitta'] > 0 else 0
         row['sale_rate'] = (row['sale_amt'] / row['sale_kitta']) if row['sale_kitta'] > 0 else 0
 
+        # --- E. Market Value ---
         price_info = latest_prices.get(symbol_obj.script_ticker, {})
         ltp = price_info.get('close_price', Decimal('0.0'))
+        if ltp <= 0 and row['cl_kitta'] > 0: ltp = row['cl_rate']
+            
         row['ltp'] = ltp
         row['market_val'] = (Decimal(row['cl_kitta']) * ltp).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         row['unrealized_pl'] = row['market_val'] - row['cl_cost']
         row['total_pl'] = row['realized_pl'] + row['unrealized_pl']
-        
         row['realized_pl_calc'] = row['realized_pl']
         row['total_pl_incl_div'] = row['total_pl'] + row['cash_dividend']
 
-        # --- F. Add to totals ---
-        if any([row['op_kitta'], row['buy_kitta'], row['bonus_kitta'], row['sale_kitta'], row['cl_kitta'], row['cash_dividend']]):
+        # --- F. PERFORMANCE SPECIFIC LOGIC (LIFO) ---
+        
+        # 1. Split Sales (New vs Op)
+        total_sales = row['sale_kitta']
+        
+        if total_sales <= period_additions_qty:
+            row['sale_from_new'] = total_sales
+            row['sale_from_op'] = 0
+        else:
+            row['sale_from_new'] = period_additions_qty
+            row['sale_from_op'] = total_sales - period_additions_qty
+            
+        # 2. Calculate Costs for P/L Split
+        cost_of_new = (period_additions_cost / Decimal(period_additions_qty)) if period_additions_qty > 0 else Decimal('0.0')
+        cost_of_op = row['op_rate']
+        avg_sale_rate = (row['sale_amt'] / Decimal(row['sale_kitta'])) if row['sale_kitta'] > 0 else Decimal('0.0')
+        
+        # 3. Calculate Realized P/L Split
+        row['pl_from_new'] = ((avg_sale_rate - cost_of_new) * Decimal(row['sale_from_new'])).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        row['pl_from_op'] = ((avg_sale_rate - cost_of_op) * Decimal(row['sale_from_op'])).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        row['op_cost_used'] = (Decimal(row['sale_from_op']) * cost_of_op).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+        # 4. Split Closing Balance (New vs Op)
+        row['cl_qty_new'] = period_additions_qty - row['sale_from_new']
+        row['cl_qty_op'] = row['op_kitta'] - row['sale_from_op']
+        
+        # 5. Calculate Paper (Unrealized) P/L Split
+        row['paper_pl_new'] = ((row['ltp'] - cost_of_new) * Decimal(row['cl_qty_new'])).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        row['paper_pl_op'] = ((row['ltp'] - cost_of_op) * Decimal(row['cl_qty_op'])).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+        # --- G. Add to totals ---
+        if any([row['op_kitta'], row['buy_kitta'], row['right_kitta'], row['bonus_kitta'], row['sale_kitta'], row['cl_kitta'], row['cash_dividend']]):
             sector_grouped_data[row['sector']].append(row)
             st = sector_totals[row['sector']]
             for key, val in row.items():
-                if isinstance(val, Decimal):
-                    st[key] += val
-                elif isinstance(val, (int, float)):
-                    st[key] += Decimal(str(val))
+                if isinstance(val, Decimal): st[key] += val
+                elif isinstance(val, (int, float)): st[key] += Decimal(str(val))
             
             for key, val in row.items():
-                if isinstance(val, Decimal):
-                    grand_totals[key] += val
-                elif isinstance(val, (int, float)):
-                    grand_totals[key] += Decimal(str(val))
+                if isinstance(val, Decimal): grand_totals[key] += val
+                elif isinstance(val, (int, float)): grand_totals[key] += Decimal(str(val))
 
-    # --- 6. Format Final Data ---
     sorted_sectors = sorted(sector_grouped_data.keys())
     sn_counter = 1
     final_data = {}
@@ -207,7 +254,6 @@ def _get_valuation_data(start_date, end_date):
         final_data[sector] = {'rows': rows, 'totals': sector_totals[sector]}
         
     return final_data, grand_totals
-
 
 # --- Existing Functions (Consolidated) ---
 

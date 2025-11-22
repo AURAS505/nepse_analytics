@@ -3,7 +3,6 @@ from django.core.exceptions import ValidationError
 from django.utils import timezone
 from datetime import datetime, timedelta
 
-
 class NepaliCalendar(models.Model):
     """Store Nepali calendar data for BS to AD conversion"""
     
@@ -124,7 +123,6 @@ class FiscalYear(models.Model):
             self.ad_end_year = self.ad_end_date.year
             
             # Generate English fiscal year string
-            # Format: 2024/25 (short form) or keep full years
             if self.ad_start_year == self.ad_end_year:
                 self.fiscal_year_english = str(self.ad_start_year)
             else:
@@ -285,3 +283,30 @@ class PublicHoliday(models.Model):
     
     def __str__(self):
         return f"{self.name} ({self.ad_date})"
+
+
+class NepaliDate(models.Model):
+    """
+    This model maps English dates to Nepali dates for quick lookups.
+    """
+    english_date = models.DateField(unique=True, help_text="Gregorian Date")
+    nepali_date = models.CharField(max_length=10, unique=True, help_text="Format: YYYY-MM-DD")
+    
+    nepali_year = models.IntegerField()
+    nepali_month = models.IntegerField()
+    nepali_day = models.IntegerField()
+    
+    day_of_week = models.IntegerField(help_text="1=Sunday, 7=Saturday")
+    day_name_english = models.CharField(max_length=15, null=True, blank=True)
+    
+    is_holiday = models.BooleanField(default=False)
+    holiday_title = models.CharField(max_length=100, null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['nepali_year', 'nepali_month']),
+            models.Index(fields=['english_date']),
+        ]
+
+    def __str__(self):
+        return f"{self.nepali_date} ({self.english_date})"

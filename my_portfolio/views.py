@@ -71,249 +71,6 @@ from reportlab.pdfgen.canvas import Canvas
 # --- Helper Functions ---
 
 
-def dictfetchall(cursor):
-    "Return all rows from a cursor as a dict"
-    columns = [col[0] for col in cursor.description]
-    return [dict(zip(columns, row)) for row in cursor.fetchall()]
-
-def fmt_currency_short(value):
-    """
-    Formats currency with C (Crore), L (Lakh), T (Thousand), and A (Arba).
-    """
-    if value is None: return "-"
-    try:
-        val = Decimal(str(value))
-    except:
-        return value
-    if val == 0: return "-"
-    
-    abs_val = abs(val)
-    
-    # --- NEW: Arba Logic (1 Arba = 100 Crores = 1,000,000,000) ---
-    if abs_val >= 1000000000: 
-        return f"{val/1000000000:.2f}A"
-    elif abs_val >= 10000000: 
-        return f"{val/10000000:.2f}C"
-    elif abs_val >= 100000: 
-        return f"{val/100000:.2f}L"
-    elif abs_val >= 1000:   
-        return f"{val/1000:.2f}T"
-    else: 
-        return f"{val:,.0f}"
-
-# ### --- THIS IS THE FULLY CORRECTED VALUATION FUNCTION --- ###
-def _get_valuation_data(start_date, end_date):
-    """
-    Calculates valuation with LIFO logic for Performance Report.
-    """
-    
-    # 1. Fetch ALL Transactions
-    transactions = Transaction.objects.filter(
-        date__lte=end_date
-    ).select_related('symbol').order_by('symbol__sector', 'symbol__script_ticker', 'date', 'created_at')
-
-    # 2. Fetch Latest Prices
-    latest_prices = {}
-    try:
-        with connection.cursor() as cursor:
-            cursor.execute("""
-                WITH RankedPrices AS (
-                    SELECT symbol, close_price, business_date,
-                        ROW_NUMBER() OVER(PARTITION BY symbol ORDER BY business_date DESC) as rn
-                    FROM stock_prices
-                    WHERE business_date <= %s
-                )
-                SELECT symbol, close_price, business_date FROM RankedPrices WHERE rn = 1;
-            """, [end_date])
-            for row in dictfetchall(cursor):
-                latest_prices[row['symbol']] = {
-                    'close_price': row.get('close_price') or Decimal('0.0'),
-                    'business_date': row.get('business_date')
-                }
-    except Exception as e:
-        print(f"Error fetching prices: {e}")
-
-    grouped_txns = defaultdict(list)
-    for txn in transactions:
-        grouped_txns[txn.symbol].append(txn)
-
-    sector_grouped_data = defaultdict(list)
-    sector_totals = defaultdict(lambda: defaultdict(Decimal))
-    grand_totals = defaultdict(lambda: Decimal('0.0'))
-    
-    TYPE_OPENING = {'Balance b/d'}
-    TYPE_SIMPLE_PURCHASE = {'BUY', 'CONVERSION(+)', 'SUSPENSE(+)', 'IPO'}
-    TYPE_RIGHT = {'RIGHT'} 
-    TYPE_BONUS = {'BONUS'} 
-    TYPE_SALES = {'SALE', 'CONVERSION(-)', 'SUSPENSE(-)'}
-    TYPE_CASH = {'CASH'}
-
-    for symbol_obj, txns in grouped_txns.items():
-        row = defaultdict(Decimal)
-        row.update({
-            'company': symbol_obj.script_ticker,
-            'company_name': symbol_obj.company_name,
-            'sector': symbol_obj.sector,
-        })
-
-        global_kitta = 0
-        global_cost = Decimal('0.0')
-        
-        # --- A. Calculate Opening Balance ---
-        for txn in txns:
-            if txn.date < start_date:
-                t_type = txn.transaction_type
-                kitta = int(txn.kitta or 0)
-                amount = txn.billed_amount if txn.billed_amount else Decimal('0.0')
-                
-                if t_type in TYPE_OPENING or t_type in TYPE_SIMPLE_PURCHASE or t_type in TYPE_BONUS or t_type in TYPE_RIGHT:
-                    global_kitta += kitta
-                    global_cost += amount
-                elif t_type in TYPE_SALES:
-                    wacc = (global_cost / Decimal(global_kitta)) if global_kitta > 0 else Decimal('0.0')
-                    cons = (Decimal(kitta) * wacc).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                    global_kitta -= kitta
-                    global_cost -= cons
-                elif t_type in TYPE_CASH:
-                    row['cash_dividend'] = Decimal(0)
-
-        row['op_kitta'] = global_kitta
-        row['op_amt'] = global_cost
-        row['op_rate'] = (row['op_amt'] / row['op_kitta']) if row['op_kitta'] > 0 else Decimal('0.0')
-
-        period_total_cost = row['op_amt']
-        period_total_qty = row['op_kitta']
-        
-        period_additions_qty = 0 
-        period_additions_cost = Decimal('0.0')
-        period_sales = [] 
-        
-        # --- B. Calculate Movements ---
-        for txn in txns:
-            if txn.date >= start_date:
-                t_type = txn.transaction_type
-                kitta = int(txn.kitta or 0)
-                amount = txn.billed_amount if txn.billed_amount else Decimal('0.0')
-                rate = txn.eff_rate if txn.eff_rate else Decimal('0.0')
-
-                if t_type in TYPE_OPENING:
-                    row['op_kitta'] += kitta; row['op_amt'] += amount
-                    period_total_qty += kitta; period_total_cost += amount
-                    period_additions_qty += kitta
-                    period_additions_cost += amount
-                
-                elif t_type in TYPE_SIMPLE_PURCHASE:
-                    row['buy_kitta'] += kitta; row['buy_amt'] += amount
-                    period_total_qty += kitta; period_total_cost += amount
-                    period_additions_qty += kitta
-                    period_additions_cost += amount
-                
-                elif t_type in TYPE_RIGHT:
-                    row['right_kitta'] += kitta; row['right_amt'] += amount
-                    period_total_qty += kitta; period_total_cost += amount
-                    period_additions_qty += kitta
-                    period_additions_cost += amount
-
-                elif t_type in TYPE_BONUS:
-                    row['bonus_kitta'] += kitta 
-                    if amount > 0: row['bonus_amt'] += amount
-                    period_total_qty += kitta; period_total_cost += amount
-                    period_additions_qty += kitta
-                    period_additions_cost += amount
-                
-                elif t_type in TYPE_SALES:
-                    row['sale_kitta'] += kitta; row['sale_amt'] += amount
-                    period_sales.append({'kitta': kitta, 'amount': amount, 'rate': rate})
-                
-                elif t_type in TYPE_CASH:
-                    row['cash_dividend'] += amount
-
-        # --- C. Process Sales ---
-        if period_total_qty > 0:
-            period_wacc_rate = period_total_cost / Decimal(period_total_qty)
-        else:
-            period_wacc_rate = Decimal('0.0')
-
-        for sale in period_sales:
-            sell_qty = sale['kitta']
-            cons = (Decimal(sell_qty) * period_wacc_rate).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            profit = sale['amount'] - cons
-            
-            row['consumption'] += cons
-            row['realized_pl'] += profit
-            
-            period_total_qty -= sell_qty
-            period_total_cost -= cons
-            if period_total_qty > 0:
-                period_wacc_rate = period_total_cost / Decimal(period_total_qty)
-            else:
-                period_wacc_rate = Decimal('0.0')
-
-        # --- D. Closing & Rates ---
-        row['cl_kitta'] = period_total_qty
-        row['cl_cost'] = period_total_cost if period_total_qty > 0 else Decimal('0.0')
-        row['cl_rate'] = (row['cl_cost'] / row['cl_kitta']) if row['cl_kitta'] > 0 else Decimal('0.0')
-
-        row['buy_rate'] = (row['buy_amt'] / row['buy_kitta']) if row['buy_kitta'] > 0 else 0
-        row['right_rate'] = (row['right_amt'] / row['right_kitta']) if row['right_kitta'] > 0 else 0
-        row['bonus_rate'] = (row['bonus_amt'] / row['bonus_kitta']) if row['bonus_kitta'] > 0 else 0
-        row['sale_rate'] = (row['sale_amt'] / row['sale_kitta']) if row['sale_kitta'] > 0 else 0
-
-        # --- E. Market Value ---
-        price_info = latest_prices.get(symbol_obj.script_ticker, {})
-        ltp = price_info.get('close_price', Decimal('0.0'))
-        if ltp <= 0 and row['cl_kitta'] > 0: ltp = row['cl_rate']
-            
-        row['ltp'] = ltp
-        row['market_val'] = (Decimal(row['cl_kitta']) * ltp).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-        row['unrealized_pl'] = row['market_val'] - row['cl_cost']
-        row['total_pl'] = row['realized_pl'] + row['unrealized_pl']
-        row['realized_pl_calc'] = row['realized_pl']
-        row['total_pl_incl_div'] = row['total_pl'] + row['cash_dividend']
-
-        # --- F. PERFORMANCE SPECIFIC: Sales Split & P/L (LIFO) ---
-        cost_of_new = (period_additions_cost / Decimal(period_additions_qty)) if period_additions_qty > 0 else Decimal('0.0')
-        cost_of_op = row['op_rate']
-        avg_sale_rate = (row['sale_amt'] / Decimal(row['sale_kitta'])) if row['sale_kitta'] > 0 else Decimal('0.0')
-        
-        total_sales = row['sale_kitta']
-        if total_sales <= period_additions_qty:
-            row['sale_from_new'] = total_sales
-            row['sale_from_op'] = 0
-        else:
-            row['sale_from_new'] = period_additions_qty
-            row['sale_from_op'] = total_sales - period_additions_qty
-            
-        row['pl_from_new'] = ((avg_sale_rate - cost_of_new) * Decimal(row['sale_from_new'])).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-        row['pl_from_op'] = ((avg_sale_rate - cost_of_op) * Decimal(row['sale_from_op'])).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-
-        # --- NEW: Calculate Cost of Opening Stock Sold (For Display) ---
-        row['op_cost_used'] = (Decimal(row['sale_from_op']) * cost_of_op).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-
-        # --- G. Add to totals ---
-        if any([row['op_kitta'], row['buy_kitta'], row['right_kitta'], row['bonus_kitta'], row['sale_kitta'], row['cl_kitta'], row['cash_dividend']]):
-            sector_grouped_data[row['sector']].append(row)
-            st = sector_totals[row['sector']]
-            for key, val in row.items():
-                if isinstance(val, Decimal): st[key] += val
-                elif isinstance(val, (int, float)): st[key] += Decimal(str(val))
-            
-            for key, val in row.items():
-                if isinstance(val, Decimal): grand_totals[key] += val
-                elif isinstance(val, (int, float)): grand_totals[key] += Decimal(str(val))
-
-    sorted_sectors = sorted(sector_grouped_data.keys())
-    sn_counter = 1
-    final_data = {}
-    for sector in sorted_sectors:
-        rows = sector_grouped_data[sector]
-        rows.sort(key=lambda x: x['company']) 
-        for r in rows: r['sn'] = sn_counter; sn_counter += 1
-        final_data[sector] = {'rows': rows, 'totals': sector_totals[sector]}
-        
-    return final_data, grand_totals
-
-
 def get_fundamental_metrics(symbol_list):
     """
     MASTER FUNCTION: Fetches metrics for BOTH Dashboard and Portfolio Watch.
@@ -414,22 +171,35 @@ def get_fundamental_metrics(symbol_list):
 
     return metrics_map
 
-
 def _get_broker_ledger_data(broker_no, sort='asc'):
+    """
+    Calculates ledger with correct running balance logic:
+    1. Always calculates strictly Chronological (Oldest -> Newest).
+    2. Reverses the list at the end if 'desc' sort is requested.
+    """
+    # 1. Fetch Cash Transactions
     cash_txns = BrokerTransaction.objects.filter(
         broker__broker_no=broker_no
     ).order_by('date', 'created_at')
 
+    # Calculate Opening Balance (Sum of all prev transactions)
+    # We assume OB is handled by filtering or Balance b/d entries. 
+    # For this specific view logic, we usually just sum the explicit 'Balance b/d'
+    # or start from 0 if looking at a specific timeframe. 
+    # (Based on your previous code, it sums 'Balance b/d' rows).
+    
     ob_entries = cash_txns.filter(action='Balance b/d')
     other_cash_txns = cash_txns.exclude(action='Balance b/d')
     opening_balance = ob_entries.aggregate(Sum('amount'))['amount__sum'] or Decimal('0.0')
 
+    # 2. Fetch Stock Transactions
     stock_txns = Transaction.objects.filter(
         broker=str(broker_no) 
     ).select_related('symbol').order_by('date', 'created_at')
 
     all_entries = []
     
+    # 3. Normalize Entries
     for txn in other_cash_txns:
         amount = txn.amount
         is_debit = False
@@ -444,6 +214,7 @@ def _get_broker_ledger_data(broker_no, sort='asc'):
 
     for txn in stock_txns:
         amount = txn.billed_amount or Decimal('0.0')
+        # Stock Sales = Debit (Money In), Stock Buys = Credit (Money Out)
         if txn.transaction_type in ['SALE', 'CONVERSION(-)', 'SUSPENSE(-)']:
             all_entries.append({
                 'date': txn.date,
@@ -463,19 +234,28 @@ def _get_broker_ledger_data(broker_no, sort='asc'):
                 'source': 'STOCK', 'debit': amount, 'credit': Decimal('0.00')
             })
             
-    all_entries.sort(key=lambda x: x['date'], reverse=(sort == 'desc'))
+    # 4. CRITICAL FIX: Always Sort ASCENDING first for calculation
+    # This ensures Opening + T1 + T2... works correctly
+    all_entries.sort(key=lambda x: x['date']) # Default ASC
 
     running_balance = opening_balance
     total_debit = Decimal('0.00')
     total_credit = Decimal('0.00')
     ledger = []
 
+    # 5. Calculate Running Balance
     for entry in all_entries:
         running_balance += entry['debit'] - entry['credit']
+        
         total_debit += entry['debit']
         total_credit += entry['credit']
+        
         entry['running_balance'] = running_balance
         ledger.append(entry)
+
+    # 6. Apply Display Sorting (Reverse if user wants Newest First)
+    if sort == 'desc':
+        ledger.reverse()
 
     return {
         'opening_balance': opening_balance,
@@ -484,6 +264,7 @@ def _get_broker_ledger_data(broker_no, sort='asc'):
         'total_credit': total_credit,
         'final_balance': running_balance
     }
+
 
 # ### --- END OF FIXED FUNCTION --- ###
 # --- STANDARD VIEWS ---
@@ -1303,19 +1084,20 @@ def api_company_details(request, symbol):
         return JsonResponse({"error": str(e)}, status=500)
 
 
-# my_portfolio/views.py
 @login_required
 def valuation_report(request):
     end_date_str = request.GET.get('end_date')
     start_date_str = request.GET.get('start_date')
-    report_type = request.GET.get('report_type', 'normal')
+    report_type = request.GET.get('report_type', 'normal') # Default to normal
 
-    if end_date_str: end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+    if end_date_str: 
+        end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
     else: 
         latest_price = StockPrices.objects.order_by('-business_date').first()
         end_date = latest_price.business_date if latest_price else timezone.now().date()
         
-    if start_date_str: start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+    if start_date_str: 
+        start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
     else:
         first_txn = Transaction.objects.order_by('date').first()
         start_date = first_txn.date if first_txn else date(2000, 1, 1)
@@ -1324,12 +1106,14 @@ def valuation_report(request):
 
     formatted_data = {}
     
-    # Added 'op_cost_used' to formatter
+    # List of fields to format currency (C, L, T, A)
     keys_to_fmt = [
         'op_amt', 'buy_amt', 'right_amt', 'bonus_amt', 'sale_amt', 
         'consumption', 'realized_pl_calc', 'cash_dividend', 
         'cl_cost', 'market_val', 'unrealized_pl', 'total_pl', 
-        'total_pl_incl_div', 'pl_from_new', 'pl_from_op', 'op_cost_used' 
+        'total_pl_incl_div', 
+        'pl_from_new', 'pl_from_op', 'op_cost_used', # Realized Split
+        'paper_pl_new', 'paper_pl_op'                # Paper Split
     ]
 
     for sector, content in raw_data.items():
@@ -1359,8 +1143,6 @@ def valuation_report(request):
         'report_type': report_type, 
     }
     return render(request, 'my_portfolio/valuation_report.html', context)
-
-
 @login_required
 def download_valuation_report(request):
     # 1. Get Parameters
@@ -1380,7 +1162,7 @@ def download_valuation_report(request):
         first_txn = Transaction.objects.order_by('date').first()
         start_date = first_txn.date if first_txn else date(2000, 1, 1)
 
-    # 2. Get Data (Calculations already handle LIFO logic)
+    # 2. Get Data
     data, totals = _get_valuation_data(start_date, end_date)
 
     # 3. Create Workbook
@@ -1396,14 +1178,14 @@ def download_valuation_report(request):
     
     align_center = Alignment(horizontal='center', vertical='center', wrap_text=True)
     align_right = Alignment(horizontal='right', vertical='center')
-    align_left = Alignment(horizontal='left', vertical='center')
     
     fill_header = PatternFill(start_color="F8F9FA", end_color="F8F9FA", fill_type="solid")
     fill_subtotal = PatternFill(start_color="DFE1E5", end_color="DFE1E5", fill_type="solid") 
     fill_grand = PatternFill(start_color="000000", end_color="000000", fill_type="solid")
     fill_profit = PatternFill(start_color="D1E7DD", end_color="D1E7DD", fill_type="solid")
     fill_loss = PatternFill(start_color="F8D7DA", end_color="F8D7DA", fill_type="solid")
-    fill_split = PatternFill(start_color="FFF3CD", end_color="FFF3CD", fill_type="solid") # Yellowish for splits
+    fill_split = PatternFill(start_color="FFF3CD", end_color="FFF3CD", fill_type="solid") 
+    fill_market = PatternFill(start_color="CFE2FF", end_color="CFE2FF", fill_type="solid")
 
     thin_side = Side(style='thin', color="E2E2E2")
     thick_side = Side(style='medium', color="999999")
@@ -1411,19 +1193,21 @@ def download_valuation_report(request):
     num_fmt = '#,##0'
     dec_fmt = '#,##0.00'
 
-    # --- 4. DEFINE HEADERS BASED ON REPORT TYPE ---
+    # --- 4. DEFINE HEADERS (COMPANY NAME RESTORED) ---
     
     if report_type == 'performance':
         # PERFORMANCE MODE HEADERS
         headers_cat = [
-            ("S.N.", 1), ("Symbol", 1), ("Company Name", 1),
+            ("S.N.", 1), ("Symbol", 1), ("Company Name", 1), # RESTORED
             ("Op. Stock Sold", 3), ("Purchase", 3), ("Rights", 3), ("Bonus", 3), 
             ("Sales Split (LIFO)", 2), ("Total Sales", 3), ("Trading P/L", 2),
-            ("Performance", 2), ("Closing (Cost)", 3), ("Market Valuation", 3), ("Net P/L", 3)
+            ("Performance", 2), ("Closing (Cost)", 3), 
+            ("Market Val (Paper P/L Split)", 4), 
+            ("Net P/L", 3)
         ]
         
         headers_det = [
-            "S.N.", "Symbol", "Company",
+            "S.N.", "Symbol", "Company", # RESTORED
             # Op Stock Sold
             "Qty", "Rate", "Amount",
             # Purchase
@@ -1443,35 +1227,35 @@ def download_valuation_report(request):
             # Closing
             "Qty", "WACC", "Cost", 
             # Market
-            "LTP", "Value", "Paper P/L", 
+            "LTP", "Value", "Paper New", "Paper Op",
             # Net P/L
             "Total Profit", "Cash Div", "Total (incl. Div)"
         ]
         
-        # Indices for thick borders (1-based)
-        # 4(Op), 7(Buy), 10(Right), 13(Bonus), 16(Split), 18(Sale), 21(PL Split), 23(Perf), 25(Close), 28(Mkt), 31(Net)
-        section_starts = {4, 7, 10, 13, 16, 18, 21, 23, 25, 28, 31}
-        total_cols = 33
+        # Indices for thick borders (Restored to original +1 shift)
+        # 4, 7, 10, 13, 16, 18, 21, 23, 25, 28, 32, 35
+        section_starts = {4, 7, 10, 13, 16, 18, 21, 23, 25, 28, 32}
+        total_cols = 34
 
     else:
         # NORMAL MODE HEADERS
         headers_cat = [
-            ("S.N.", 1), ("Symbol", 1), ("Company Name", 1),
-            ("Opening", 3), ("Purchase", 3), ("Bonus", 3), ("Sales", 3), 
+            ("S.N.", 1), ("Symbol", 1), ("Company Name", 1), # RESTORED
+            ("Opening", 3), ("Purchase", 3), ("Rights", 3), ("Bonus", 3), ("Sales", 3), 
             ("Performance", 2), ("Closing (Cost)", 3), ("Market Valuation", 3), ("Net P/L", 3)
         ]
         
         headers_det = [
-            "S.N.", "Symbol", "Company",
-            "Qty", "Rate", "Amount", "Qty", "Rate", "Amount", "Qty", "Rate", "Amount", 
+            "S.N.", "Symbol", "Company", # RESTORED
+            "Qty", "Rate", "Amount", "Qty", "Rate", "Amount", "Qty", "Rate", "Amount", "Qty", "Rate", "Amount", 
             "Qty", "Rate", "Amount", "Consump", "Real. P/L",
             "Qty", "WACC", "Cost", "LTP", "Value", "Paper P/L", 
             "Total Profit", "Cash Div", "Total (incl. Div)"
         ]
-        section_starts = {4, 7, 10, 13, 16, 18, 21, 24}
-        total_cols = 26
+        section_starts = {4, 7, 10, 13, 16, 19, 21, 24, 27}
+        total_cols = 29
 
-    # WRITE ROW 1 (Categories)
+    # WRITE ROW 1
     col = 1
     for title, span in headers_cat:
         cell = ws.cell(row=1, column=col, value=title)
@@ -1479,24 +1263,18 @@ def download_valuation_report(request):
         cell.alignment = align_center
         cell.fill = fill_header
         
-        # Borders
         border_args = {'top': thin_side, 'bottom': thin_side}
-        if col == 1: border_args['left'] = thick_side
-        if col > 3: border_args['left'] = thick_side 
-        else: border_args['left'] = thin_side
+        border_args['left'] = thick_side if col in section_starts or col == 1 else thin_side
         border_args['right'] = thin_side
-        
         cell.border = Border(**border_args)
         
         if span > 1:
             ws.merge_cells(start_row=1, start_column=col, end_row=1, end_column=col+span-1)
-            # Apply border to merged range end
-            end_cell = ws.cell(row=1, column=col+span-1)
-            end_cell.border = Border(top=thin_side, bottom=thin_side, right=thin_side)
+            ws.cell(row=1, column=col+span-1).border = Border(top=thin_side, bottom=thin_side, right=thin_side)
             
         col += span
 
-    # WRITE ROW 2 (Details)
+    # WRITE ROW 2
     for c_idx, title in enumerate(headers_det, 1):
         cell = ws.cell(row=2, column=c_idx, value=title)
         cell.font = font_header
@@ -1509,8 +1287,8 @@ def download_valuation_report(request):
     current_row = 3
     
     for sector, content in data.items():
-        # SECTOR HEADER
-        ws.cell(row=current_row, column=2, value=sector).font = font_subtotal
+        # Sector Header (Col 2)
+        ws.cell(row=current_row, column=2, value=f"{sector.upper()}").font = font_subtotal
         ws.cell(row=current_row, column=3, value="Sub Total").font = font_subtotal
         
         for c in range(1, total_cols + 1):
@@ -1522,7 +1300,7 @@ def download_valuation_report(request):
 
         t = content['totals']
         
-        # Helper to write values
+        # Helper to write
         def w(c, val, is_pl=False):
             cell = ws.cell(row=current_row, column=c, value=val)
             cell.number_format = num_fmt
@@ -1531,38 +1309,38 @@ def download_valuation_report(request):
                 cell.font = Font(name='Calibri', size=9, bold=True, color="9C0006" if val < 0 else "006100")
 
         if report_type == 'performance':
-            # Performance Subtotals
-            w(4, t['sale_from_op']); w(6, t['op_cost_used']) # Op Stock Sold
+            w(4, t['sale_from_op']); w(6, t['op_cost_used'])
             w(7, t['buy_kitta']); w(9, t['buy_amt'])
             w(10, t['right_kitta']); w(12, t['right_amt'])
             w(13, t['bonus_kitta']); w(15, t['bonus_amt'])
-            w(16, t['sale_from_new']); w(17, t['sale_from_op']) # Split
+            w(16, t['sale_from_new']); w(17, t['sale_from_op'])
             w(18, t['sale_kitta']); w(20, t['sale_amt'])
-            w(21, t['pl_from_new'], True); w(22, t['pl_from_op'], True) # P/L Split
+            w(21, t['pl_from_new'], True); w(22, t['pl_from_op'], True)
             w(23, t['consumption']); w(24, t['realized_pl_calc'], True)
             w(25, t['cl_kitta']); w(27, t['cl_cost'])
-            w(29, t['market_val']); w(30, t['unrealized_pl'], True)
-            w(31, t['total_pl'], True); w(32, t['cash_dividend']); w(33, t['total_pl_incl_div'], True)
+            w(29, t['market_val'])
+            w(30, t['paper_pl_new'], True); w(31, t['paper_pl_op'], True)
+            w(32, t['total_pl'], True); w(33, t['cash_dividend']); w(34, t['total_pl_incl_div'], True)
         else:
-            # Normal Subtotals
             w(4, t['op_kitta']); w(6, t['op_amt'])
             w(7, t['buy_kitta']); w(9, t['buy_amt'])
-            w(10, t['bonus_kitta']); w(12, t['bonus_amt'])
-            w(13, t['sale_kitta']); w(15, t['sale_amt'])
-            w(16, t['consumption']); w(17, t['realized_pl_calc'], True)
-            w(18, t['cl_kitta']); w(20, t['cl_cost'])
-            w(22, t['market_val']); w(23, t['unrealized_pl'], True)
-            w(24, t['total_pl'], True); w(25, t['cash_dividend']); w(26, t['total_pl_incl_div'], True)
+            w(10, t['right_kitta']); w(12, t['right_amt'])
+            w(13, t['bonus_kitta']); w(15, t['bonus_amt'])
+            w(16, t['sale_kitta']); w(18, t['sale_amt'])
+            w(19, t['consumption']); w(20, t['realized_pl_calc'], True)
+            w(21, t['cl_kitta']); w(23, t['cl_cost'])
+            w(25, t['market_val']); w(26, t['unrealized_pl'], True)
+            w(27, t['total_pl'], True); w(28, t['cash_dividend']); w(29, t['total_pl_incl_div'], True)
 
         current_row += 1
 
-        # STOCK ROWS
+        # Stock Rows
         for r in content['rows']:
             c1 = ws.cell(row=current_row, column=1, value=r['sn'])
             c1.alignment = align_center
-            c2 = ws.cell(row=current_row, column=2, value=r['company'])
-            c2.font = Font(name='Calibri', size=9, bold=True)
-            ws.cell(row=current_row, column=3, value=r['company_name'])
+            ws.cell(row=current_row, column=2, value=r['company']).font = Font(name='Calibri', size=9, bold=True)
+            # RESTORED: Company Name in Col 3
+            ws.cell(row=current_row, column=3, value=r['company_name']).font = font_body
 
             def wv(col, val, fmt=num_fmt, is_pl=False, bg=None):
                 c = ws.cell(row=current_row, column=col, value=val)
@@ -1577,54 +1355,42 @@ def download_valuation_report(request):
                     c.fill = fill_loss if val < 0 else fill_profit
 
             if report_type == 'performance':
-                # Op Stock Sold (Performance Logic)
-                wv(4, r['sale_from_op'] or 0)
-                wv(5, r['op_rate'], dec_fmt)
-                wv(6, r['op_cost_used'])
-                
-                # Purchase
+                # Op Stock Sold
+                wv(4, r['sale_from_op'] or 0); wv(5, r['op_rate'], dec_fmt); wv(6, r['op_cost_used'])
+                # Buy
                 wv(7, r['buy_kitta'] or 0); wv(8, r['buy_rate'], dec_fmt); wv(9, r['buy_amt'])
                 # Rights
                 wv(10, r['right_kitta'] or 0); wv(11, r['right_rate'], dec_fmt); wv(12, r['right_amt'])
                 # Bonus
                 wv(13, r['bonus_kitta'] or 0); wv(14, r['bonus_rate'], dec_fmt); wv(15, r['bonus_amt'])
-                
-                # Sales Split (Highlighted)
+                # Splits
                 wv(16, r['sale_from_new'] or 0, num_fmt, False, fill_split)
                 wv(17, r['sale_from_op'] or 0, num_fmt, False, fill_split)
-                
-                # Total Sales
+                # Sales
                 wv(18, r['sale_kitta'] or 0); wv(19, r['sale_rate'], dec_fmt); wv(20, r['sale_amt'])
-                
-                # P/L Split (Highlighted)
-                wv(21, r['pl_from_new'], dec_fmt, True, None) # Let P/L color logic handle text color if needed, or custom
-                # Applying manual color for P/L text on split
-                c = ws.cell(row=current_row, column=21)
-                c.font = Font(color="9C0006" if r['pl_from_new'] < 0 else "006100", bold=True)
-                
-                wv(22, r['pl_from_op'], dec_fmt, True, None)
-                c = ws.cell(row=current_row, column=22)
-                c.font = Font(color="9C0006" if r['pl_from_op'] < 0 else "006100", bold=True)
-
-                # Performance
+                # PL
+                wv(21, r['pl_from_new'], num_fmt, True); wv(22, r['pl_from_op'], num_fmt, True)
+                # Perf
                 wv(23, r['consumption']); wv(24, r['realized_pl_calc'], num_fmt, True)
                 # Closing
                 wv(25, r['cl_kitta']); wv(26, r['cl_rate'], dec_fmt); wv(27, r['cl_cost'])
                 # Market
-                wv(28, r['ltp'], dec_fmt); wv(29, r['market_val']); wv(30, r['unrealized_pl'], num_fmt, True)
+                wv(28, r['ltp'], dec_fmt); wv(29, r['market_val'])
+                wv(30, r['paper_pl_new'], num_fmt, True, fill_market); wv(31, r['paper_pl_op'], num_fmt, True, fill_market)
                 # Net
-                wv(31, r['total_pl'], num_fmt, True); wv(32, r['cash_dividend']); wv(33, r['total_pl_incl_div'], num_fmt, True)
+                wv(32, r['total_pl'], num_fmt, True); wv(33, r['cash_dividend']); wv(34, r['total_pl_incl_div'], num_fmt, True)
 
             else:
-                # Normal Logic
+                # Normal
                 wv(4, r['op_kitta'] or 0); wv(5, r['op_rate'], dec_fmt); wv(6, r['op_amt'])
                 wv(7, r['buy_kitta'] or 0); wv(8, r['buy_rate'], dec_fmt); wv(9, r['buy_amt'])
-                wv(10, r['bonus_kitta'] or 0); wv(11, r['bonus_rate'], dec_fmt); wv(12, r['bonus_amt'])
-                wv(13, r['sale_kitta'] or 0); wv(14, r['sale_rate'], dec_fmt); wv(15, r['sale_amt'])
-                wv(16, r['consumption']); wv(17, r['realized_pl_calc'], num_fmt, True)
-                wv(18, r['cl_kitta']); wv(19, r['cl_rate'], dec_fmt); wv(20, r['cl_cost'])
-                wv(21, r['ltp'], dec_fmt); wv(22, r['market_val']); wv(23, r['unrealized_pl'], num_fmt, True)
-                wv(24, r['total_pl'], num_fmt, True); wv(25, r['cash_dividend']); wv(26, r['total_pl_incl_div'], num_fmt, True)
+                wv(10, r['right_kitta'] or 0); wv(11, r['right_rate'], dec_fmt); wv(12, r['right_amt'])
+                wv(13, r['bonus_kitta'] or 0); wv(14, r['bonus_rate'], dec_fmt); wv(15, r['bonus_amt'])
+                wv(16, r['sale_kitta'] or 0); wv(17, r['sale_rate'], dec_fmt); wv(18, r['sale_amt'])
+                wv(19, r['consumption']); wv(20, r['realized_pl_calc'], num_fmt, True)
+                wv(21, r['cl_kitta']); wv(22, r['cl_rate'], dec_fmt); wv(23, r['cl_cost'])
+                wv(24, r['ltp'], dec_fmt); wv(25, r['market_val']); wv(26, r['unrealized_pl'], num_fmt, True)
+                wv(27, r['total_pl'], num_fmt, True); wv(28, r['cash_dividend']); wv(29, r['total_pl_incl_div'], num_fmt, True)
             
             current_row += 1
 
@@ -1646,28 +1412,39 @@ def download_valuation_report(request):
 
     if report_type == 'performance':
         wg(4, totals['sale_from_op']); wg(6, totals['op_cost_used'])
-        wg(9, totals['buy_amt']); wg(12, totals['right_amt']); wg(15, totals['bonus_amt'])
+        wg(7, totals['buy_kitta']); wg(9, totals['buy_amt']) # Corrected cols
+        wg(10, totals['right_kitta']); wg(12, totals['right_amt'])
+        wg(13, totals['bonus_kitta']); wg(15, totals['bonus_amt'])
         wg(16, totals['sale_from_new']); wg(17, totals['sale_from_op'])
-        wg(20, totals['sale_amt']); wg(21, totals['pl_from_new'], True); wg(22, totals['pl_from_op'], True)
+        wg(18, totals['sale_kitta']); wg(20, totals['sale_amt'])
+        wg(21, totals['pl_from_new'], True); wg(22, totals['pl_from_op'], True)
         wg(23, totals['consumption']); wg(24, totals['realized_pl_calc'], True)
-        wg(27, totals['cl_cost']); wg(29, totals['market_val']); wg(30, totals['unrealized_pl'], True)
-        wg(31, totals['total_pl'], True); wg(32, totals['cash_dividend']); wg(33, totals['total_pl_incl_div'], True)
+        wg(25, totals['cl_kitta']); wg(27, totals['cl_cost'])
+        wg(29, totals['market_val'])
+        wg(30, totals['paper_pl_new'], True); wg(31, totals['paper_pl_op'], True)
+        wg(32, totals['total_pl'], True); wg(33, totals['cash_dividend']); wg(34, totals['total_pl_incl_div'], True)
     else:
-        wg(6, totals['op_amt']); wg(9, totals['buy_amt']); wg(12, totals['bonus_amt'])
-        wg(15, totals['sale_amt']); wg(16, totals['consumption']); wg(17, totals['realized_pl_calc'], True)
-        wg(20, totals['cl_cost']); wg(22, totals['market_val']); wg(23, totals['unrealized_pl'], True)
-        wg(24, totals['total_pl'], True); wg(25, totals['cash_dividend']); wg(26, totals['total_pl_incl_div'], True)
+        wg(4, totals['op_kitta']); wg(6, totals['op_amt'])
+        wg(7, totals['buy_kitta']); wg(9, totals['buy_amt'])
+        wg(10, totals['right_kitta']); wg(12, totals['right_amt'])
+        wg(13, totals['bonus_kitta']); wg(15, totals['bonus_amt'])
+        wg(16, totals['sale_kitta']); wg(18, totals['sale_amt'])
+        wg(19, totals['consumption']); wg(20, totals['realized_pl_calc'], True)
+        wg(21, totals['cl_kitta']); wg(23, totals['cl_cost'])
+        wg(25, totals['market_val']); wg(26, totals['unrealized_pl'], True)
+        wg(27, totals['total_pl'], True); wg(28, totals['cash_dividend']); wg(29, totals['total_pl_incl_div'], True)
 
     # Auto-width
     for c in range(1, total_cols + 1):
-        ws.column_dimensions[get_column_letter(c)].width = 12
+        ws.column_dimensions[get_column_letter(c)].width = 11
+        if c == 3: # Company Name Wider
+            ws.column_dimensions[get_column_letter(c)].width = 25
 
     response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    fname = f"Valuation_Report_{report_type}_{end_date}.xlsx"
+    fname = f"Valuation_{report_type}_{end_date}.xlsx"
     response['Content-Disposition'] = f'attachment; filename={fname}'
     wb.save(response)
     return response
-
 
 # --- ADD THESE NEW VIEWS FOR BROKER TRANSACTIONS ---
 @login_required
@@ -2076,7 +1853,7 @@ def api_broker_settlement_summary(request):
         sort_by = request.GET.get('sort_by', 'final_balance')
         sort_dir = request.GET.get('sort_dir', 'desc')
         
-        # --- Default Date Logic (Find min/max dates) ---
+        # --- Default Date Logic ---
         rp_dates = BrokerTransaction.objects.aggregate(min_date=Min('date'), max_date=Max('date'))
         sp_dates = Transaction.objects.aggregate(min_date=Min('date'), max_date=Max('date'))
 
@@ -2098,7 +1875,6 @@ def api_broker_settlement_summary(request):
 
         start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date() if start_date_str else default_start_date
         end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date() if end_date_str else default_end_date
-        # --- End Date Logic ---
         
         # 2. Get all active brokers
         rp_brokers = set(BrokerTransaction.objects.values_list('broker__broker_no', flat=True).distinct())
@@ -2108,10 +1884,13 @@ def api_broker_settlement_summary(request):
         
         brokers = Brokers.objects.filter(broker_no__in=active_broker_nos)
         
-        # 3. Define transaction types
+        # 3. Define Transaction Types for Ledger Logic
+        # Debits (Money Inflow / Receivable)
         CASH_DEBIT_ACTIONS = ['Receipt', 'Misc(+)']
-        CASH_CREDIT_ACTIONS = ['Payment', 'Chq Issue', 'Pledge Charge', 'Misc(-)']
         STOCK_DEBIT_TYPES = ['SALE', 'CONVERSION(-)', 'SUSPENSE(-)']
+        
+        # Credits (Money Outflow / Payable)
+        CASH_CREDIT_ACTIONS = ['Payment', 'Chq Issue', 'Pledge Charge', 'Misc(-)']
         STOCK_CREDIT_TYPES = ['BUY', 'IPO', 'RIGHT', 'CONVERSION(+)', 'SUSPENSE(+)']
 
         # 4. Calculate for each broker
@@ -2120,63 +1899,87 @@ def api_broker_settlement_summary(request):
             broker_no = broker.broker_no
             broker_no_str = str(broker_no)
 
-            # --- Opening Balance (all txns before start_date) ---
+            # --- A. Opening Balance (All txns BEFORE start_date) ---
+            
+            # Cash OB
             cash_ob_txns = BrokerTransaction.objects.filter(broker__broker_no=broker_no, date__lt=start_date)
-            cash_ob_balance_bd = cash_ob_txns.filter(action='Balance b/d').aggregate(total=Coalesce(Sum('amount'), Decimal(0)))['total']
-            cash_ob_debit = cash_ob_txns.filter(action__in=CASH_DEBIT_ACTIONS).aggregate(total=Coalesce(Sum('amount'), Decimal(0)))['total']
-            cash_ob_credit = cash_ob_txns.filter(action__in=CASH_CREDIT_ACTIONS).aggregate(total=Coalesce(Sum('amount'), Decimal(0)))['total']
-            op_balance_cash = cash_ob_balance_bd + cash_ob_debit - cash_ob_credit
+            cash_ob_bd = cash_ob_txns.filter(action='Balance b/d').aggregate(t=Coalesce(Sum('amount'), Decimal(0)))['t']
+            cash_ob_dr = cash_ob_txns.filter(action__in=CASH_DEBIT_ACTIONS).aggregate(t=Coalesce(Sum('amount'), Decimal(0)))['t']
+            cash_ob_cr = cash_ob_txns.filter(action__in=CASH_CREDIT_ACTIONS).aggregate(t=Coalesce(Sum('amount'), Decimal(0)))['t']
+            op_cash = cash_ob_bd + cash_ob_dr - cash_ob_cr
             
-            stock_ob_debit = Transaction.objects.filter(
+            # Stock OB
+            stock_ob_dr = Transaction.objects.filter(
                 broker=broker_no_str, transaction_type__in=STOCK_DEBIT_TYPES, date__lt=start_date
-            ).aggregate(total=Coalesce(Sum('billed_amount'), Decimal(0)))['total']
-            stock_ob_credit = Transaction.objects.filter(
+            ).aggregate(t=Coalesce(Sum('billed_amount'), Decimal(0)))['t']
+            
+            stock_ob_cr = Transaction.objects.filter(
                 broker=broker_no_str, transaction_type__in=STOCK_CREDIT_TYPES, date__lt=start_date
-            ).aggregate(total=Coalesce(Sum('billed_amount'), Decimal(0)))['total']
-            op_balance_stock = stock_ob_debit - stock_ob_credit
-            op_balance = op_balance_cash + op_balance_stock
+            ).aggregate(t=Coalesce(Sum('billed_amount'), Decimal(0)))['t']
             
-            # --- Period Movements (between start_date and end_date) ---
+            op_balance = op_cash + (stock_ob_dr - stock_ob_cr)
             
-            # A. Total Receipt (Cash In)
-            total_cash_debit = BrokerTransaction.objects.filter(
+            # --- B. Period Movements (Within Date Range) ---
+            
+            # 1. Cash Receipts (Debit)
+            total_receipt = BrokerTransaction.objects.filter(
                 broker__broker_no=broker_no, date__range=[start_date, end_date], action__in=CASH_DEBIT_ACTIONS
-            ).aggregate(total=Coalesce(Sum('amount'), Decimal(0)))['total']
+            ).aggregate(t=Coalesce(Sum('amount'), Decimal(0)))['t']
             
-            # B. Total Sale (Stock In)
-            total_stock_debit = Transaction.objects.filter(
-                broker=broker_no_str, transaction_type__in=STOCK_DEBIT_TYPES, date__range=[start_date, end_date]
-            ).aggregate(total=Coalesce(Sum('billed_amount'), Decimal(0)))['total']
-
-            # C. Total Payment (Cash Out)
-            total_cash_credit = BrokerTransaction.objects.filter(
+            # 2. Cash Payments (Credit)
+            total_payment = BrokerTransaction.objects.filter(
                 broker__broker_no=broker_no, date__range=[start_date, end_date], action__in=CASH_CREDIT_ACTIONS
-            ).aggregate(total=Coalesce(Sum('amount'), Decimal(0)))['total']
+            ).aggregate(t=Coalesce(Sum('amount'), Decimal(0)))['t']
             
-            # D. Total Buy (Stock Out)
-            total_stock_credit = Transaction.objects.filter(
-                broker=broker_no_str, transaction_type__in=STOCK_CREDIT_TYPES, date__range=[start_date, end_date]
-            ).aggregate(total=Coalesce(Sum('billed_amount'), Decimal(0)))['total']
+            # 3. Stock Sales & Sell Commission (Debit)
+            sale_data = Transaction.objects.filter(
+                broker=broker_no_str, 
+                transaction_type__in=STOCK_DEBIT_TYPES, 
+                date__range=[start_date, end_date]
+            ).aggregate(
+                amt=Coalesce(Sum('billed_amount'), Decimal(0)),
+                comm=Coalesce(Sum('broker_commission'), Decimal(0))
+            )
+            total_sale = sale_data['amt']
+            sell_commission = sale_data['comm']
+
+            # 4. Stock Buys & Buy Commission (Credit)
+            buy_data = Transaction.objects.filter(
+                broker=broker_no_str, 
+                transaction_type__in=STOCK_CREDIT_TYPES, 
+                date__range=[start_date, end_date]
+            ).aggregate(
+                amt=Coalesce(Sum('billed_amount'), Decimal(0)),
+                comm=Coalesce(Sum('broker_commission'), Decimal(0))
+            )
+            total_buy = buy_data['amt']
+            buy_commission = buy_data['comm']
+
+            # Total Commission
+            total_commission = sell_commission + buy_commission
+
+            # --- C. Final Balance ---
+            # Formula: Op + (Receipts + Sales) - (Payments + Buys)
+            final_balance = op_balance + (total_receipt + total_sale) - (total_payment + total_buy)
             
-            # E. Final Balance
-            final_balance = op_balance + (total_cash_debit + total_stock_debit) - (total_cash_credit + total_stock_credit)
-            
-            # --- UPDATED SUMMARY DICTIONARY ---
             summary_list.append({
                 "broker_no": broker_no,
                 "broker_name": broker.name,
                 "op_balance": op_balance,
-                "total_sale": total_stock_debit,    # Renamed
-                "total_receipt": total_cash_debit,  # Renamed
-                "total_buy": total_stock_credit,    # Renamed
-                "total_payment": total_cash_credit, # Renamed
+                "total_sale": total_sale,
+                "total_receipt": total_receipt,
+                "total_buy": total_buy,
+                "total_payment": total_payment,
                 "final_balance": final_balance,
+                "buy_commission": buy_commission,   # Specific Buy Comm
+                "sell_commission": sell_commission, # Specific Sell Comm
+                "total_commission": total_commission, # Total Comm
             })
             
         # 5. Sort the list
         summary_list.sort(key=lambda x: x[sort_by], reverse=(sort_dir == 'desc'))
         
-        # 6. Calculate Totals
+        # 6. Calculate Grand Totals
         grand_total = {
             "op_balance": sum(item['op_balance'] for item in summary_list),
             "total_sale": sum(item['total_sale'] for item in summary_list),
@@ -2184,6 +1987,9 @@ def api_broker_settlement_summary(request):
             "total_buy": sum(item['total_buy'] for item in summary_list),
             "total_payment": sum(item['total_payment'] for item in summary_list),
             "final_balance": sum(item['final_balance'] for item in summary_list),
+            "buy_commission": sum(item['buy_commission'] for item in summary_list),
+            "sell_commission": sum(item['sell_commission'] for item in summary_list),
+            "total_commission": sum(item['total_commission'] for item in summary_list),
         }
 
         return JsonResponse({
@@ -2195,7 +2001,8 @@ def api_broker_settlement_summary(request):
         
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
-    
+
+
 
 @login_required
 def sp_report(request):
