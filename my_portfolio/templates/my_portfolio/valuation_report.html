@@ -5,25 +5,67 @@
 {% block title %}Valuation Report{% endblock %}
 
 {% block title_header %}
-<i class="bi bi-graph-up"></i> Valuation Report
+<span><i class="bi bi-graph-up"></i> Valuation Report</span>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Sticky Control Card */
+    .sticky-top-card {
+        position: sticky;
+        top: 0;
+        z-index: 1020;
+        background-color: #fff;
+        border-radius: 0 0 4px 4px;
+    }
+    
+    /* Sticky Table Header */
+    .sticky-table-header th {
+        position: sticky;
+        top: 0; 
+        z-index: 1010;
+        background-color: #f8f9fa; 
+        box-shadow: 0 2px 2px -1px rgba(0,0,0,0.1);
+    }
+</style>
 {% endblock %}
 
 {% block content %}
-<div class="card shadow-sm mb-4">
+<div id="controlCard" class="card shadow-sm mb-4 sticky-top-card">
     <div class="card-header">
         <form method="GET" class="row g-3 align-items-center">
-            <div class="col-md-4">
-                <label for="start_date" class="form-label">Start Date</label>
-                <input type="date" class="form-control" id="start_date" name="start_date" value="{{ start_date|date:'Y-m-d' }}">
+            <div class="col-md-1">
+                <a href="{% url 'my_portfolio:portfolio_home' %}" class="btn btn-outline-secondary btn-sm w-100" title="Back to Dashboard">
+                    <i class="bi bi-arrow-left"></i> Back
+                </a>
             </div>
-            <div class="col-md-4">
-                <label for="end_date" class="form-label">End Date</label>
-                <input type="date" class="form-control" id="end_date" name="end_date" value="{{ end_date|date:'Y-m-d' }}">
+
+            <div class="col-md-3">
+                <label for="start_date" class="form-label small fw-bold visually-hidden">Start Date</label>
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text">Start</span>
+                    <input type="date" class="form-control" id="start_date" name="start_date" value="{{ start_date|date:'Y-m-d' }}">
+                </div>
             </div>
-            <div class="col-md-4 d-flex align-items-end">
-                <button type="submit" class="btn btn-primary me-2"><i class="bi bi-filter"></i> Run Report</button>
-                <a href="{% url 'my_portfolio:download_valuation_report' %}?start_date={{ start_date|date:'Y-m-d' }}&end_date={{ end_date|date:'Y-m-d' }}" class="btn btn-success">
-                    <i class="bi bi-file-earmark-excel"></i> Download
+            <div class="col-md-3">
+                <label for="end_date" class="form-label small fw-bold visually-hidden">End Date</label>
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text">End</span>
+                    <input type="date" class="form-control" id="end_date" name="end_date" value="{{ end_date|date:'Y-m-d' }}">
+                </div>
+            </div>
+            <div class="col-md-2">
+                <label for="report_type" class="form-label small fw-bold visually-hidden">Type</label>
+                <select name="report_type" id="report_type" class="form-select form-select-sm">
+                    <option value="normal" {% if report_type == 'normal' %}selected{% endif %}>Normal Valuation</option>
+                    <option value="performance" {% if report_type == 'performance' %}selected{% endif %}>Performance</option>
+                </select>
+            </div>
+            <div class="col-md-3 d-flex gap-2">
+                <button type="submit" class="btn btn-primary btn-sm flex-grow-1"><i class="bi bi-filter"></i> Run</button>
+                
+                <a href="{% url 'my_portfolio:download_valuation_report' %}?start_date={{ start_date|date:'Y-m-d' }}&end_date={{ end_date|date:'Y-m-d' }}&report_type={{ report_type }}" class="btn btn-success btn-sm flex-grow-1">
+                    <i class="bi bi-file-earmark-excel"></i> Excel
                 </a>
             </div>
         </form>
@@ -32,74 +74,126 @@
 
 <div class="table-responsive">
     <table class="table table-sm table-hover table-bordered" style="font-size: 0.8rem;">
-        <thead class="table-light text-center align-middle" style="position: sticky; top: 0; z-index: 2;">
+        <thead id="tableHeader" class="table-light text-center align-middle sticky-table-header">
             <tr>
                 <th rowspan="2" class="text-start">S.N.</th>
                 <th rowspan="2" class="text-start">Symbol</th>
                 <th rowspan="2" class="text-start" style="min-width: 150px;">Company Name</th>
-                <th colspan="3" class="border-start">Opening</th>
+                
+                <th colspan="3" class="border-start">
+                    {% if report_type == 'performance' %}Op. Stock Sold{% else %}Opening{% endif %}
+                </th>
                 <th colspan="3" class="border-start">Purchase</th>
+                
+                {% if report_type == 'performance' %}
+                    <th colspan="3" class="border-start">Rights</th>
+                {% endif %}
+                
                 <th colspan="3" class="border-start">Bonus</th>
-                <th colspan="3" class="border-start">Sales</th>
-                <th colspan="2" class="border-start">Performance</th> <th colspan="3" class="border-start">Closing (Cost)</th>
+                
+                {% if report_type == 'performance' %}
+                    <th colspan="2" class="border-start bg-warning-subtle">Sales Split (LIFO)</th>
+                    <th colspan="3" class="border-start">Total Sales</th>
+                    <th colspan="2" class="border-start bg-info-subtle">Trading P/L (LIFO)</th>
+                {% else %}
+                    <th colspan="3" class="border-start">Sales</th>
+                {% endif %}
+                
+                <th colspan="2" class="border-start">Performance</th> 
+                <th colspan="3" class="border-start">Closing (Cost)</th>
                 <th colspan="3" class="border-start">Market Valuation</th>
-                <th colspan="3" class="border-start">Net P/L</th> </tr>
+                <th colspan="3" class="border-start">Net P/L</th> 
+            </tr>
             <tr>
-                <th class="border-start">Qty</th>
-                <th>Rate</th>
-                <th>Amount</th>
-                <th class="border-start">Qty</th>
-                <th>Rate</th>
-                <th>Amount</th>
-                <th class="border-start">Qty</th>
-                <th>Rate</th>
-                <th>Amount</th>
-                <th class="border-start">Qty</th>
-                <th>Rate</th>
-                <th>Amount</th>
-                <th class="border-start">Consumption</th>
-                <th>Real. P/L</th>
-                <th class="border-start">Qty</th>
-                <th>WACC</th>
-                <th>Cost</th>
-                <th class="border-start">LTP ({{ end_date|date:'Y-m-d' }})</th>
-                <th>Value</th>
-                <th>Unreal. P/L</th>
-                <th class="border-start">Total Profit</th>
-                <th>Cash Div</th> <th>Total (incl. Div)</th> </tr>
-            </thead>
+                <th class="border-start">Qty</th> <th>Rate</th> <th>Amount</th>
+                
+                <th class="border-start">Qty</th> <th>Rate</th> <th>Amount</th>
+                
+                {% if report_type == 'performance' %}
+                    <th class="border-start">Qty</th> <th>Rate</th> <th>Amount</th>
+                {% endif %}
+                
+                <th class="border-start">Qty</th> <th>Rate</th> <th>Amount</th>
+                
+                {% if report_type == 'performance' %}
+                    <th class="border-start bg-warning-subtle text-dark" title="Sold from Period Buy/Bonus">From New</th>
+                    <th class="bg-warning-subtle text-dark" title="Sold from Opening">From Op</th>
+                    <th class="border-start">Qty</th> <th>Rate</th> <th>Amount</th>
+                    
+                    <th class="border-start bg-info-subtle text-dark">P/L New</th>
+                    <th class="bg-info-subtle text-dark">P/L Op</th>
+                {% else %}
+                    <th class="border-start">Qty</th> <th>Rate</th> <th>Amount</th>
+                {% endif %}
+                
+                <th class="border-start">Consumption</th> <th>Real. P/L</th>
+                
+                <th class="border-start">Qty</th> <th>WACC</th> <th>Cost</th>
+                
+                <th class="border-start">LTP</th> <th>Value</th> <th>Paper P/L</th>
+                
+                <th class="border-start">Total Profit</th> <th>Cash Div</th> <th>Total (incl. Div)</th> 
+            </tr>
+        </thead>
         <tbody>
             {% for sector, content in valuation_data.items %}
                 <tr class="table-group-divider">
-                    <td colspan="3" class="fw-bold bg-light-subtle text-dark">
-                        {{ sector|upper }} - Sub Total
-                    </td>
-                    <td class="text-end fw-bold bg-light-subtle">{{ content.totals.op_kitta|intcomma }}</td>
-                    <td class="text-end fw-bold bg-light-subtle"></td>
-                    <td class="text-end fw-bold bg-light-subtle">{{ content.totals.op_amt }}</td>
-                    <td class="text-end fw-bold bg-light-subtle">{{ content.totals.buy_kitta|intcomma }}</td>
-                    <td class="text-end fw-bold bg-light-subtle"></td>
-                    <td class="text-end fw-bold bg-light-subtle">{{ content.totals.buy_amt }}</td>
-                    <td class="text-end fw-bold bg-light-subtle">{{ content.totals.bonus_kitta|intcomma }}</td>
-                    <td class="text-end fw-bold bg-light-subtle"></td>
-                    <td class="text-end fw-bold bg-light-subtle">{{ content.totals.bonus_amt }}</td>
-                    <td class="text-end fw-bold bg-light-subtle">{{ content.totals.sale_kitta|intcomma }}</td>
-                    <td class="text-end fw-bold bg-light-subtle"></td>
-                    <td class="text-end fw-bold bg-light-subtle">{{ content.totals.sale_amt }}</td>
-                    <td class="text-end fw-bold bg-light-subtle">{{ content.totals.consumption }}</td>
+                    <td colspan="3" class="fw-bold bg-light-subtle text-dark">{{ sector|upper }} - Sub Total</td>
                     
+                    {% if report_type == 'performance' %}
+                        <td class="text-end fw-bold bg-light-subtle">{{ content.totals.sale_from_op|intcomma }}</td>
+                        <td class="bg-light-subtle"></td>
+                        <td class="text-end fw-bold bg-light-subtle">{{ content.totals.op_cost_used }}</td>
+                    {% else %}
+                        <td class="text-end fw-bold bg-light-subtle">{{ content.totals.op_kitta|intcomma }}</td>
+                        <td class="bg-light-subtle"></td>
+                        <td class="text-end fw-bold bg-light-subtle">{{ content.totals.op_amt }}</td>
+                    {% endif %}
+                    
+                    <td class="text-end fw-bold bg-light-subtle">{{ content.totals.buy_kitta|intcomma }}</td>
+                    <td class="bg-light-subtle"></td>
+                    <td class="text-end fw-bold bg-light-subtle">{{ content.totals.buy_amt }}</td>
+                    
+                    {% if report_type == 'performance' %}
+                        <td class="text-end fw-bold bg-light-subtle">{{ content.totals.right_kitta|intcomma }}</td>
+                        <td class="bg-light-subtle"></td>
+                        <td class="text-end fw-bold bg-light-subtle">{{ content.totals.right_amt }}</td>
+                    {% endif %}
+                    
+                    <td class="text-end fw-bold bg-light-subtle">{{ content.totals.bonus_kitta|intcomma }}</td>
+                    <td class="bg-light-subtle"></td>
+                    <td class="text-end fw-bold bg-light-subtle">{{ content.totals.bonus_amt }}</td>
+                    
+                    {% if report_type == 'performance' %}
+                        <td class="text-end fw-bold bg-warning-subtle text-dark">{{ content.totals.sale_from_new|intcomma }}</td>
+                        <td class="text-end fw-bold bg-warning-subtle text-dark">{{ content.totals.sale_from_op|intcomma }}</td>
+                    {% endif %}
+                    
+                    <td class="text-end fw-bold bg-light-subtle">{{ content.totals.sale_kitta|intcomma }}</td>
+                    <td class="bg-light-subtle"></td>
+                    <td class="text-end fw-bold bg-light-subtle">{{ content.totals.sale_amt }}</td>
+                    
+                    {% if report_type == 'performance' %}
+                        <td class="text-end fw-bold bg-info-subtle text-dark">{{ content.totals.pl_from_new }}</td>
+                        <td class="text-end fw-bold bg-info-subtle text-dark">{{ content.totals.pl_from_op }}</td>
+                    {% endif %}
+                    
+                    <td class="text-end fw-bold bg-light-subtle">{{ content.totals.consumption }}</td>
                     <td class="text-end fw-bold bg-light-subtle">{{ content.totals.realized_pl_calc }}</td>
                     
                     <td class="text-end fw-bold bg-light-subtle">{{ content.totals.cl_kitta|intcomma }}</td>
-                    <td class="text-end fw-bold bg-light-subtle"></td>
+                    <td class="bg-light-subtle"></td>
                     <td class="text-end fw-bold bg-light-subtle">{{ content.totals.cl_cost }}</td>
-                    <td class="text-end fw-bold bg-light-subtle"></td>
+                    
+                    <td class="bg-light-subtle"></td>
                     <td class="text-end fw-bold bg-light-subtle">{{ content.totals.market_val }}</td>
                     <td class="text-end fw-bold bg-light-subtle">{{ content.totals.unrealized_pl }}</td>
+                    
                     <td class="text-end fw-bold bg-light-subtle">{{ content.totals.total_pl }}</td>
                     <td class="text-end fw-bold bg-light-subtle">{{ content.totals.cash_dividend }}</td>
                     <td class="text-end fw-bold bg-light-subtle">{{ content.totals.total_pl_incl_div }}</td>
                 </tr>
+
                 {% for row in content.rows %}
                 <tr>
                     <td class="text-center">{{ row.sn }}</td>
@@ -108,25 +202,46 @@
                     </td>
                     <td class="text-start">{{ row.company_name }}</td>
                     
-                    <td class="text-end">{{ row.op_kitta|intcomma }}</td>
-                    <td class="text-end">{{ row.op_rate|floatformat:2|intcomma }}</td>
-                    <td class="text-end">{{ row.op_amt }}</td>
+                    {% if report_type == 'performance' %}
+                        <td class="text-end">{{ row.sale_from_op|intcomma }}</td>
+                        <td class="text-end">{{ row.op_rate|floatformat:2|intcomma }}</td>
+                        <td class="text-end">{{ row.op_cost_used }}</td>
+                    {% else %}
+                        <td class="text-end">{{ row.op_kitta|intcomma }}</td>
+                        <td class="text-end">{{ row.op_rate|floatformat:2|intcomma }}</td>
+                        <td class="text-end">{{ row.op_amt }}</td>
+                    {% endif %}
                     
                     <td class="text-end">{{ row.buy_kitta|intcomma }}</td>
                     <td class="text-end">{{ row.buy_rate|floatformat:2|intcomma }}</td>
                     <td class="text-end">{{ row.buy_amt }}</td>
                     
+                    {% if report_type == 'performance' %}
+                        <td class="text-end">{{ row.right_kitta|intcomma }}</td>
+                        <td class="text-end">{{ row.right_rate|floatformat:2|intcomma }}</td>
+                        <td class="text-end">{{ row.right_amt }}</td>
+                    {% endif %}
+                    
                     <td class="text-end">{{ row.bonus_kitta|intcomma }}</td>
-                    <td class_name="text-end">{{ row.bonus_rate|floatformat:2|intcomma }}</td>
+                    <td class="text-end">{{ row.bonus_rate|floatformat:2|intcomma }}</td>
                     <td class="text-end">{{ row.bonus_amt }}</td>
+                    
+                    {% if report_type == 'performance' %}
+                        <td class="text-end bg-warning-subtle text-dark fw-semibold">{{ row.sale_from_new|intcomma }}</td>
+                        <td class="text-end bg-warning-subtle text-dark fw-semibold">{{ row.sale_from_op|intcomma }}</td>
+                    {% endif %}
                     
                     <td class="text-end">{{ row.sale_kitta|intcomma }}</td>
                     <td class="text-end">{{ row.sale_rate|floatformat:2|intcomma }}</td>
                     <td class="text-end">{{ row.sale_amt }}</td>
                     
-                    <td class="text-end">{{ row.consumption }}</td>
+                    {% if report_type == 'performance' %}
+                        <td class="text-end bg-info-subtle text-dark {% if row.pl_from_new.0 == '-' %}text-danger{% else %}text-success{% endif %}">{{ row.pl_from_new }}</td>
+                        <td class="text-end bg-info-subtle text-dark {% if row.pl_from_op.0 == '-' %}text-danger{% else %}text-success{% endif %}">{{ row.pl_from_op }}</td>
+                    {% endif %}
                     
-                    <td class="text-end">{{ row.realized_pl_calc }}</td>
+                    <td class="text-end">{{ row.consumption }}</td>
+                    <td class="text-end {% if row.realized_pl_calc.0 == '-' %}text-danger{% else %}text-success{% endif %}">{{ row.realized_pl_calc }}</td>
                     
                     <td class="text-end">{{ row.cl_kitta|intcomma }}</td>
                     <td class="text-end">{{ row.cl_rate|floatformat:2|intcomma }}</td>
@@ -134,40 +249,63 @@
                     
                     <td class="text-end">{{ row.ltp|floatformat:2|intcomma }}</td>
                     <td class="text-end">{{ row.market_val }}</td>
-                    <td class="text-end">{{ row.unrealized_pl }}</td>
+                    <td class="text-end {% if row.unrealized_pl.0 == '-' %}text-danger{% else %}text-success{% endif %}">{{ row.unrealized_pl }}</td>
                     
-                    <td class="text-end">{{ row.total_pl }}</td>
+                    <td class="text-end fw-bold">{{ row.total_pl }}</td>
                     <td class="text-end">{{ row.cash_dividend }}</td>
-                    <td class="text-end">{{ row.total_pl_incl_div }}</td>
+                    <td class="text-end fw-bold">{{ row.total_pl_incl_div }}</td>
                 </tr>
                 {% endfor %}
             {% endfor %}
         </tbody>
+        
         <tfoot class="table-dark" style="position: sticky; bottom: 0; z-index: 2;">
             <tr>
                 <td colspan="3" class="text-start fw-bold">GRAND TOTAL</td>
-                <td class="text-end fw-bold"></td>
-                <td class="text-end fw-bold"></td>
-                <td class="text-end fw-bold">{{ grand_totals.op_amt }}</td>
-                <td class="text-end fw-bold"></td>
-                <td class="text-end fw-bold"></td>
-                <td class="text-end fw-bold">{{ grand_totals.buy_amt }}</td>
-                <td class="text-end fw-bold"></td>
-                <td class="text-end fw-bold"></td>
-                <td class="text-end fw-bold">{{ grand_totals.bonus_amt }}</td>
-                <td class="text-end fw-bold"></td>
-                <td class="text-end fw-bold"></td>
-                <td class="text-end fw-bold">{{ grand_totals.sale_amt }}</td>
-                <td class="text-end fw-bold">{{ grand_totals.consumption }}</td>
                 
+                {% if report_type == 'performance' %}
+                    <td class="text-end fw-bold">{{ grand_totals.sale_from_op|intcomma }}</td>
+                    <td></td>
+                    <td class="text-end fw-bold">{{ grand_totals.op_cost_used }}</td>
+                {% else %}
+                    <td class="text-end fw-bold"></td> <td></td>
+                    <td class="text-end fw-bold">{{ grand_totals.op_amt }}</td>
+                {% endif %}
+                
+                <td class="text-end fw-bold"></td> <td></td>
+                <td class="text-end fw-bold">{{ grand_totals.buy_amt }}</td>
+                
+                {% if report_type == 'performance' %}
+                    <td class="text-end fw-bold"></td> <td></td>
+                    <td class="text-end fw-bold">{{ grand_totals.right_amt }}</td>
+                {% endif %}
+                
+                <td class="text-end fw-bold"></td> <td></td>
+                <td class="text-end fw-bold">{{ grand_totals.bonus_amt }}</td>
+                
+                {% if report_type == 'performance' %}
+                    <td class="text-end fw-bold">{{ grand_totals.sale_from_new|intcomma }}</td>
+                    <td class="text-end fw-bold">{{ grand_totals.sale_from_op|intcomma }}</td>
+                {% endif %}
+                
+                <td class="text-end fw-bold"></td> <td></td>
+                <td class="text-end fw-bold">{{ grand_totals.sale_amt }}</td>
+                
+                {% if report_type == 'performance' %}
+                    <td class="text-end fw-bold">{{ grand_totals.pl_from_new }}</td>
+                    <td class="text-end fw-bold">{{ grand_totals.pl_from_op }}</td>
+                {% endif %}
+                
+                <td class="text-end fw-bold">{{ grand_totals.consumption }}</td>
                 <td class="text-end fw-bold">{{ grand_totals.realized_pl_calc }}</td>
                 
-                <td class="text-end fw-bold"></td>
-                <td class="text-end fw-bold"></td>
+                <td class="text-end fw-bold"></td> <td></td>
                 <td class="text-end fw-bold">{{ grand_totals.cl_cost }}</td>
-                <td class="text-end fw-bold"></td>
+                
+                <td></td>
                 <td class="text-end fw-bold">{{ grand_totals.market_val }}</td>
                 <td class="text-end fw-bold">{{ grand_totals.unrealized_pl }}</td>
+                
                 <td class="text-end fw-bold">{{ grand_totals.total_pl }}</td>
                 <td class="text-end fw-bold">{{ grand_totals.cash_dividend }}</td>
                 <td class="text-end fw-bold">{{ grand_totals.total_pl_incl_div }}</td>
@@ -175,4 +313,25 @@
         </tfoot>
     </table>
 </div>
+
+{% block extra_js %}
+<script>
+    document.addEventListener("DOMContentLoaded", function() {
+        const controlCard = document.getElementById('controlCard');
+        const tableHeader = document.getElementById('tableHeader');
+        
+        function adjustHeader() {
+            if (controlCard && tableHeader) {
+                const height = controlCard.offsetHeight;
+                const ths = tableHeader.querySelectorAll('th');
+                ths.forEach(th => {
+                    th.style.top = height + 'px';
+                });
+            }
+        }
+        adjustHeader();
+        window.addEventListener('resize', adjustHeader);
+    });
+</script>
+{% endblock %}
 {% endblock %}
