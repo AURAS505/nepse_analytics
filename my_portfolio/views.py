@@ -64,6 +64,8 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from openpyxl.worksheet.page import PageMargins
+from reportlab.pdfgen.canvas import Canvas
+
 
 
 # --- Helper Functions ---
@@ -2833,36 +2835,33 @@ def download_my_share_csv(request):
         ])
         
     return response
+# my_portfolio/views.py
 
 @login_required
 def generate_trading_sheet(request):
     """
     Generates a Trading Sheet (PDF & Excel).
-    - Values in CRORES.
-    - Excel: Auto-fit Columns, Fit Sheet on One Page (1x1), No Margins.
-    - Orientation: Portrait.
-    - Alignment: Center (Data), Left (Script/Sector).
+    - Report generated in MORNING (before trading).
+    - Transit Logic:
+      - Sun/Mon: Sum of 1 Day Buy (Prev Trading Day).
+      - Tue/Wed/Thu/Fri/Sat: Sum of 2 Days Buy (Prev 2 Trading Days).
     """
     
     # --- A. PREPARE DATA ---
     
-    # 1. Determine Report Date (Latest Snapshot)
-    # Always check for the latest snapshot date first
     latest_snapshot = MeroShareHolding.objects.aggregate(Max('snapshot_date'))['snapshot_date__max']
     report_date = latest_snapshot if latest_snapshot else date.today()
     
     today_calc = date.today()
-    start_date = date(2000, 1, 1) 
+    start_date_val = date(2000, 1, 1) 
     
-    # 2. Get Valuation Data
-    raw_valuation_data, grand_totals = _get_valuation_data(start_date, today_calc)
+    raw_valuation_data, grand_totals = _get_valuation_data(start_date_val, today_calc)
     
     CRORE = Decimal("10000000")
     grand_bv_cr = grand_totals['cl_cost'] / CRORE
     grand_mv_cr = grand_totals['market_val'] / CRORE
     grand_vpl_cr = grand_totals['total_pl'] / CRORE
 
-    # 3. Get Demat Providers
     demat_accounts = DematAccount.objects.all().order_by('id')
     demat_headers = []
     for acc in demat_accounts:
@@ -2873,13 +2872,63 @@ def generate_trading_sheet(request):
         else: short_name = name_upper.split()[0][:5]
         demat_headers.append({'id': acc.id, 'name': short_name})
 
-    # 4. Get Free Balances
     free_balance_map = defaultdict(dict)
     ms_holdings = MeroShareHolding.objects.all()
     for h in ms_holdings:
         free_balance_map[h.symbol.script_ticker][h.demat_account.id] = h.free_balance
 
-    # 5. Get Technical Data
+    # --- NEW: Calculate In-Transit (Buy) Shares (Morning Logic) ---
+    wd = report_date.weekday() # Mon=0, Sun=6
+    
+    transit_start_date = None
+    transit_end_date = None
+
+    if wd == 6: # SUNDAY Morning
+        # Rule: 1 Day Buy (Thursday) -> 3 days ago
+        transit_start_date = report_date - timedelta(days=3)
+        transit_end_date = report_date - timedelta(days=3)
+        
+    elif wd == 0: # MONDAY Morning
+        # Rule: 1 Day Buy (Sunday) -> 1 day ago
+        transit_start_date = report_date - timedelta(days=1)
+        transit_end_date = report_date - timedelta(days=1)
+        
+    elif wd == 1: # TUESDAY Morning
+        # Rule: 2 Days Buy (Sunday, Monday)
+        transit_start_date = report_date - timedelta(days=2) # Sunday
+        transit_end_date = report_date - timedelta(days=1)   # Monday
+
+    elif wd == 2: # WEDNESDAY Morning
+        # Rule: 2 Days Buy (Monday, Tuesday)
+        transit_start_date = report_date - timedelta(days=2)
+        transit_end_date = report_date - timedelta(days=1)
+
+    elif wd == 3: # THURSDAY Morning
+        # Rule: 2 Days Buy (Tuesday, Wednesday)
+        transit_start_date = report_date - timedelta(days=2)
+        transit_end_date = report_date - timedelta(days=1)
+
+    elif wd == 4: # FRIDAY Morning
+        # Rule: 2 Days Buy (Wednesday, Thursday)
+        transit_start_date = report_date - timedelta(days=2)
+        transit_end_date = report_date - timedelta(days=1)
+
+    elif wd == 5: # SATURDAY Morning (Friday No Trading)
+        # Rule: 2 Days Buy (Wednesday, Thursday) -> 3 days ago to 2 days ago
+        transit_start_date = report_date - timedelta(days=3)
+        transit_end_date = report_date - timedelta(days=2)
+
+    transit_map = defaultdict(int)
+    if transit_start_date and transit_end_date:
+        transit_txns = Transaction.objects.filter(
+            transaction_type='BUY',
+            date__range=[transit_start_date, transit_end_date]
+        ).values('symbol__script_ticker').annotate(total_buy=Sum('kitta'))
+        
+        for t in transit_txns:
+            transit_map[t['symbol__script_ticker']] = t['total_buy']
+    # -----------------------------------------------
+
     technical_map = {}
     all_symbols = []
     for sector_data in raw_valuation_data.values():
@@ -2906,7 +2955,6 @@ def generate_trading_sheet(request):
             else: technical_map[symbol] = {}
         else: technical_map[symbol] = {}
 
-    # 6. Enrich Portfolio Data
     sector_grouped_data = {}
     sn_counter = 1
     
@@ -2938,6 +2986,8 @@ def generate_trading_sheet(request):
             for d in demat_headers:
                 bal = free_balance_map.get(symbol, {}).get(d['id'], 0)
                 free_bals.append(bal)
+            
+            transit_qty = transit_map.get(symbol, 0)
 
             tech = technical_map.get(symbol, {})
             
@@ -2953,6 +3003,7 @@ def generate_trading_sheet(request):
                 'vpl_cr': vpl / CRORE,
                 'pl_pct': pl_pct,
                 'free_balances': free_bals,
+                'transit': transit_qty,
                 'target_buy': tech.get('s1', 0),
                 'price_sale': tech.get('r1', 0),
                 's2': tech.get('s2', 0),
@@ -2976,42 +3027,34 @@ def generate_trading_sheet(request):
                 }
             }
 
-# --- B. GENERATE EXCEL ---
+    # --- B. GENERATE EXCEL ---
     if request.GET.get('type') == 'excel':
         wb = Workbook()
         ws = wb.active
         ws.title = "Trading Sheet"
         
-        # --- STYLES ---
         style_title = Font(size=14, bold=True, color="000000") 
         style_header = Font(bold=True, color="FFFFFF")
-        
-        # REQUESTED CHANGE: Increased Font Size (1.5 points larger than standard 11)
         font_highlight = Font(size=12.5, bold=True) 
         
         fill_header = PatternFill("solid", fgColor="000000") 
         fill_super = PatternFill("solid", fgColor="808080") 
         fill_sector = PatternFill("solid", fgColor="D9D9D9")
-        
-        # REQUESTED CHANGE: Orange Color (Lighter 80%)
         fill_highlight = PatternFill("solid", fgColor="FDE9D9") 
         
         thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
         center_align = Alignment(horizontal="center", vertical="center")
         left_align = Alignment(horizontal="left", vertical="center")
 
-        # --- HEADERS ---
-        # Title with Snapshot Date
         ws.merge_cells('A1:F1'); ws['A1'] = "TRADING SHEET"; ws['A1'].font = style_title; ws['A1'].alignment = center_align
         ws.merge_cells('A2:F2'); ws['A2'] = f"Date: {report_date.strftime('%Y-%m-%d')}"; ws['A2'].font = Font(bold=True); ws['A2'].alignment = center_align
 
-        # Columns Calculation
         col_free_start = 11
         col_free_end = 10 + len(demat_headers)
-        col_tech_start = col_free_end + 1
+        col_transit = col_free_end + 1
+        col_tech_start = col_transit + 1
         col_tech_end = col_tech_start + 3
 
-        # Super Headers
         ws.merge_cells(start_row=3, start_column=col_free_start, end_row=3, end_column=col_free_end)
         c = ws.cell(row=3, column=col_free_start, value="Free Balance")
         c.font = style_header; c.fill = fill_super; c.alignment = center_align
@@ -3020,9 +3063,9 @@ def generate_trading_sheet(request):
         c = ws.cell(row=3, column=col_tech_start, value="Support/Resistance")
         c.font = style_header; c.fill = fill_super; c.alignment = center_align
 
-        # Main Headers
         headers = ["SN", "Grade", "Script", "Qty", "Rate", "BV (Cr)", "LTP", "MV (Cr)", "V P/L (Cr)", "P/L %"]
         for d in demat_headers: headers.append(d['name'])
+        headers.append("Transit")
         headers.extend(["Tgt Buy", "Prc Sale", "S2", "R2"])
         
         ws.append([]) 
@@ -3030,11 +3073,9 @@ def generate_trading_sheet(request):
             cell = ws.cell(row=4, column=col_num, value=header)
             cell.fill = fill_header; cell.font = style_header; cell.alignment = center_align; cell.border = thin_border
 
-        # --- DATA ROWS ---
         for sector, data in sector_grouped_data.items():
             rows = data['rows']; totals = data['totals']
 
-            # Sector Header with Totals
             ws.append([sector.upper(), "", "", "", "", 
                        totals['bv_str'], "", totals['mv_str'], float(totals['vpl_cr']), totals['pl_pct_str']])
             sec_row_idx = ws.max_row
@@ -3043,11 +3084,10 @@ def generate_trading_sheet(request):
             for c in range(1, len(headers) + 1):
                 cell = ws.cell(row=sec_row_idx, column=c)
                 cell.font = Font(bold=True); cell.fill = fill_sector; cell.border = thin_border
-                if c == 1: cell.alignment = left_align # Sector Name Left
-                else: cell.alignment = center_align    # Totals Center
+                if c == 1: cell.alignment = left_align 
+                else: cell.alignment = center_align
                 if c == 9: cell.number_format = '#,##0.00'
 
-            # Stock Rows
             for r in rows:
                 row_data = [
                     r['sn'], r['grade'], r['script'], float(r['qty']), float(r['wacc']), 
@@ -3055,6 +3095,7 @@ def generate_trading_sheet(request):
                     f"{r['pl_pct']:.2f}%"
                 ]
                 for bal in r['free_balances']: row_data.append(float(bal) if bal > 0 else 0)
+                row_data.append(float(r['transit']) if r['transit'] > 0 else 0)
                 row_data.extend([float(r['target_buy']), float(r['price_sale']), float(r['s2']), float(r['r2'])])
                 ws.append(row_data)
                 
@@ -3063,34 +3104,20 @@ def generate_trading_sheet(request):
                     cell = ws.cell(row=curr_row, column=col)
                     cell.border = thin_border
                     
-                    # --- APPLYING REQUESTED STYLES ---
-                    
-                    # 1. Script/Symbol Column (Column 3)
                     if col == 3:
-                        cell.font = font_highlight # Size 12.5, Bold
-                        cell.fill = fill_highlight # Orange 80%
-                        cell.alignment = left_align
-                    
-                    # 2. Free Balance Columns
+                        cell.font = font_highlight; cell.fill = fill_highlight; cell.alignment = left_align
                     elif col_free_start <= col <= col_free_end:
-                        cell.font = font_highlight # Size 12.5, Bold
-                        cell.fill = fill_highlight # Orange 80%
-                        cell.alignment = center_align
-
-                    # 3. Default Styling for other columns
+                        cell.font = font_highlight; cell.fill = fill_highlight; cell.alignment = center_align
+                    elif col == col_transit:
+                         cell.font = Font(bold=True); cell.alignment = center_align
                     else:
-                        if col == 10: # P/L Color
-                             cell.font = Font(color="FF0000" if r['pl_pct'] < 0 else "006100")
-                        
-                        # Center Align most data
+                        if col == 10: cell.font = Font(color="FF0000" if r['pl_pct'] < 0 else "006100")
                         if col == 1 or col == 2 or col in [4, 5, 6, 7, 8, 9] or col >= col_tech_start:
                             cell.alignment = center_align
 
-                    # Number formatting
-                    if col == 4 or (11 <= col < col_tech_start): cell.number_format = '#,##0'
+                    if col == 4 or (11 <= col <= col_transit): cell.number_format = '#,##0'
                     elif col in [5, 6, 7, 8, 9] or col >= col_tech_start: cell.number_format = '#,##0.00'
 
-        # --- GRAND TOTAL ROW ---
         ws.append(["GRAND TOTAL", "", "", "", "", 
                    f"{grand_bv_cr:,.2f}", "", f"{grand_mv_cr:,.2f}", f"{grand_vpl_cr:,.2f}", ""])
         grand_row = ws.max_row
@@ -3103,16 +3130,13 @@ def generate_trading_sheet(request):
             if c == 1: cell.alignment = left_align
             else: cell.alignment = center_align
 
-        # --- PRINT & PAGE SETUP ---
         ws.page_setup.orientation = ws.ORIENTATION_PORTRAIT
         ws.page_setup.paperSize = ws.PAPERSIZE_A4
         ws.page_setup.fitToPage = True
-        ws.page_setup.fitToHeight = 1  
-        ws.page_setup.fitToWidth = 1   
+        ws.page_setup.fitToHeight = 1; ws.page_setup.fitToWidth = 1   
         ws.page_margins = PageMargins(left=0.1, right=0.1, top=0.1, bottom=0.1, header=0.0, footer=0.0)
         ws.print_options.horizontalCentered = True
 
-        # Auto-width adjustment
         for i, col_cells in enumerate(ws.columns, 1):
             max_len = 0; col_letter = get_column_letter(i)
             for cell in col_cells:
@@ -3120,112 +3144,269 @@ def generate_trading_sheet(request):
                 try:
                     if cell.value: max_len = max(max_len, len(str(cell.value)))
                 except: pass
-            
-            # Add extra padding for the larger font columns (Script & Free Balance)
-            extra_padding = 4 if (i == 3 or col_free_start <= i <= col_free_end) else 2.5
-            ws.column_dimensions[col_letter].width = min(max_len + extra_padding, 50)
+            extra = 4 if (i == 3 or col_free_start <= i <= col_free_end) else 2.5
+            ws.column_dimensions[col_letter].width = min(max_len + extra, 50)
 
         response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
         response['Content-Disposition'] = f'attachment; filename="Trading_Sheet_{report_date}.xlsx"'
         wb.save(response)
         return response
-
-    # --- C. GENERATE PDF ---
+    
+# --- C. GENERATE PDF (Ultra-Compact Fit) ---
     else:
         response = HttpResponse(content_type='application/pdf')
         response['Content-Disposition'] = f'attachment; filename="Trading_Sheet_{report_date}.pdf"'
 
-        doc = SimpleDocTemplate(response, pagesize=A4, rightMargin=2, leftMargin=2, topMargin=2, bottomMargin=2)
+        from reportlab.pdfgen.canvas import Canvas
+        from reportlab.lib.units import inch
+
+        # Optimized margins for maximum space
+        doc = SimpleDocTemplate(
+            response,
+            pagesize=A4,
+            leftMargin=0.1 * inch,
+            rightMargin=0.1 * inch,
+            topMargin=0.3 * inch,
+            bottomMargin=0.2 * inch,
+        )
+
+        def autosize_columns(table_data, max_total_width, min_width=8):
+            """Measure the widest text per column → calculate width."""
+            temp_canvas = Canvas(None)
+            pdf_font = "Helvetica"
+            font_size = 6
+
+            num_cols = len(table_data[0])
+            col_widths = [min_width] * num_cols
+
+            # Fixed width for SN column (index 0)
+            sn_fixed_width = temp_canvas.stringWidth("99", pdf_font, font_size) + 8
+            col_widths[0] = sn_fixed_width
+
+            # Auto-size all OTHER columns, but SKIP sector rows for column 2 (Script)
+            for row_idx, row in enumerate(table_data):
+                for i, cell in enumerate(row):
+                    if i == 0:  # Skip SN column
+                        continue
+                    
+                    # For Script column (index 2), skip sector name rows
+                    # Sector rows are those where column 0 is empty and column 2 has ALL CAPS text
+                    if i == 2 and row[0] == '' and str(cell).isupper() and len(str(cell)) > 10:
+                        continue
+                    
+                    width = temp_canvas.stringWidth(str(cell), pdf_font, font_size)
+                    col_widths[i] = max(col_widths[i], width + 6)
+
+            # Scale only the non-SN columns if needed
+            total_width = sum(col_widths)
+            if total_width > max_total_width:
+                other_cols_width = total_width - sn_fixed_width
+                available_width = max_total_width - sn_fixed_width
+                scale = available_width / other_cols_width
+                
+                for i in range(1, num_cols):
+                    col_widths[i] = col_widths[i] * scale
+
+            return col_widths
+
+        def auto_shrink_table(table, doc):
+            max_width = A4[0] - doc.leftMargin - doc.rightMargin
+            max_height = A4[1] - doc.topMargin - doc.bottomMargin
+
+            # Start with reasonable font and aggressively shrink
+            font_size = 8.0
+            while font_size >= 2.0:  # Go as low as 2.0 if needed
+                table.setStyle(TableStyle([
+                    ('FONTSIZE', (0,0), (-1,-1), font_size),
+                    ('LEADING', (0,0), (-1,-1), font_size + 0.3),  # Very tight line spacing
+                ]))
+
+                temp_canvas = Canvas(None)
+                w, h = table.wrapOn(temp_canvas, 0, 0)
+
+                print(f"Testing font size {font_size:.2f}: width={w:.1f}/{max_width:.1f}, height={h:.1f}/{max_height:.1f}")
+
+                if w <= max_width and h <= max_height:
+                    print(f"✓ SUCCESS: Table fits at font size {font_size:.2f}")
+                    return font_size
+
+                font_size -= 0.05
+
+            print(f"⚠ WARNING: Using minimum font size {font_size:.2f}")
+            return font_size
+
         elements = []
         styles = getSampleStyleSheet()
-        title_style = ParagraphStyle('TinyTitle', parent=styles['Title'], fontSize=10, alignment=1)
-        
-        elements.append(Paragraph(f"<b>TRADING SHEET</b>", title_style))
-        elements.append(Paragraph(f"As of: {report_date.strftime('%Y-%m-%d')}", ParagraphStyle('Sub', parent=styles['Normal'], fontSize=6, alignment=1)))
-        elements.append(Spacer(1, 4))
 
-        base_headers = ["SN", "Gr", "Script", "Qty", "Rate", "BV(Cr)", "MR", "MV(Cr)", "VPL(Cr)", "P/L%"]
+        # Title - very compact
+        title_style = ParagraphStyle('MainTitle', parent=styles['Title'],
+                                    fontSize=10, alignment=1, spaceAfter=0, spaceBefore=0)
+        elements.append(Paragraph("<b>TRADING SHEET</b>", title_style))
+
+        # Subtitle - minimal spacing
+        sub_style = ParagraphStyle('SubTitle', parent=styles['Normal'],
+                                fontSize=7, alignment=1, spaceAfter=2, spaceBefore=0)
+        elements.append(Paragraph(f"<b>Date: {report_date}</b>", sub_style))
+
+        # Headers
+        base_headers = ["SN", "Grade", "Script", "Qty", "Rate", "BV (Cr)",
+                        "LTP", "MV (Cr)", "V P/L (Cr)", "P/L %"]
+
         demat_names = [d['name'] for d in demat_headers]
-        tech_headers = ["Buy", "Sale", "S2", "R2"]
-        all_headers = base_headers + demat_names + tech_headers
-        total_cols = len(all_headers)
+        tech_headers = ["Tgt Buy", "Prc Sale", "S2", "R2"]
 
-        idx_script = 2 
-        idx_free_start = 10 
-        idx_free_end = 10 + len(demat_names)
+        main_headers = base_headers + demat_names + ["Transit"] + tech_headers
 
-        weights = [0.5, 0.4, 1.1, 0.9, 0.7, 1.0, 0.7, 1.0, 0.9, 0.8] + ([0.8]*len(demat_names)) + [0.7, 0.7, 0.7, 0.7]
-        unit_w = 591 / sum(weights)
-        col_widths = [w * unit_w for w in weights]
+        # Build table_data
+        table_data = []
 
-        table_data = [all_headers]
+        # Super-header row
+        super_row = [""] * len(main_headers)
+        idx_script = 2
+        idx_free_start = 10
+        idx_free_end = idx_free_start + len(demat_names) - 1
+        idx_transit = idx_free_end + 1
+        idx_tech_start = idx_transit + 1
+        idx_tech_end = len(main_headers) - 1
+
+        # Center "Free Balance" over demat columns only (not transit)
+        if len(demat_names) > 0:
+            super_row[idx_free_start] = "Free Balance"
+        
+        # Center "Support/Resistance" over the 4 technical columns
+        super_row[idx_tech_start] = "Support/Resistance"
+
+        table_data.append(super_row)
+        table_data.append(main_headers)
+
+        # Body rows
+        for sector, data in sector_grouped_data.items():
+            totals = data['totals']
+
+            sec_row = [
+                "", "", sector.upper(), "", "",
+                totals['bv_str'], "", totals['mv_str'],
+                f"{totals['vpl_cr']:,.2f}", totals['pl_pct_str']
+            ]
+            sec_row += [''] * (len(demat_names) + 5)
+            table_data.append(sec_row)
+
+            for r in data['rows']:
+                def fmt_num(n): return f"{n:,.2f}" if n != int(n) else f"{n:,.0f}"
+                def fmt_cr(n): return f"{n:,.2f}"
+
+                row = [
+                    r['sn'], '', r['script'], fmt_num(r['qty']),
+                    fmt_num(r['wacc']), fmt_cr(r['bv_cr']),
+                    fmt_num(r['ltp']), fmt_cr(r['mv_cr']),
+                    fmt_cr(r['vpl_cr']), f"{r['pl_pct']:.2f}%"
+                ]
+
+                for bal in r['free_balances']:
+                    row.append(fmt_num(bal) if bal > 0 else "0")
+
+                row.append(fmt_num(r['transit']) if r['transit'] > 0 else "0")
+
+                row.extend([
+                    fmt_num(r['target_buy']), fmt_num(r['price_sale']),
+                    fmt_num(r['s2']), fmt_num(r['r2'])
+                ])
+
+                table_data.append(row)
+
+        # Grand Total
+        grand_row = [
+            "", "", "GRAND TOTAL", "", "",
+            f"{grand_bv_cr:,.2f}", "",
+            f"{grand_mv_cr:,.2f}", f"{grand_vpl_cr:,.2f}", ""
+        ]
+        grand_row += [''] * (len(demat_names) + 5)
+        table_data.append(grand_row)
+
+        # Column widths
+        max_width = A4[0] - doc.leftMargin - doc.rightMargin
+        col_widths = autosize_columns(table_data, max_width)
+
+        # Table style
+        orange_color = colors.HexColor('#FDE9D9')
         
         tbl_style = [
-            ('BACKGROUND', (0, 0), (-1, 0), colors.black),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'), # Default Center
-            ('ALIGN', (idx_script, 0), (idx_script, -1), 'LEFT'), # Script Left
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 5),
-            ('GRID', (0, 0), (-1, -1), 0.1, colors.black),
-            ('FONTSIZE', (0, 1), (-1, -1), 4.5),
-            ('TOPPADDING', (0, 0), (-1, -1), 0.5),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 0.5),
-            ('FONTNAME', (idx_free_start, 0), (idx_free_end-1, 0), 'Helvetica-BoldOblique'),
+            ('GRID', (0,0), (-1,-1), 0.3, colors.black),
+            ('FONTNAME', (0,0), (-1,-1), 'Helvetica'),
+            ('FONTSIZE', (0,0), (-1,-1), 6),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+            
+            # Left align SN and Script columns
+            ('ALIGN', (0,2), (0,-1), 'LEFT'),
+            ('ALIGN', (2,0), (2,-1), 'LEFT'),
+
+            ('TOPPADDING', (0,0), (-1,-1), 0.5),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 0.5),
+            ('LEFTPADDING', (0,0), (-1,-1), 1.5),
+            ('RIGHTPADDING', (0,0), (-1,-1), 1.5),
+
+            # Header row styling
+            ('BACKGROUND', (0,1), (-1,1), colors.black),
+            ('TEXTCOLOR', (0,1), (-1,1), colors.white),
+            ('FONTNAME', (0,1), (-1,1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0,1), (-1,1), 6.5),
+            
+            # Super header styling - merge cells for centered labels
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0,0), (-1,0), 7),
+            ('ALIGN', (0,0), (-1,0), 'CENTER'),
         ]
 
-        row_idx = 1
+        # Add spans for super header
+        if len(demat_names) > 1:
+            # Span "Free Balance" across demat columns only
+            tbl_style.append(('SPAN', (idx_free_start, 0), (idx_free_end, 0)))
+        
+        # Span "Support/Resistance" across all 4 technical columns
+        idx_tech_end = len(main_headers) - 1
+        tbl_style.append(('SPAN', (idx_tech_start, 0), (idx_tech_end, 0)))
+
+        # Sector styling
+        row_idx = 2
         for sector, data in sector_grouped_data.items():
-            rows = data['rows']; totals = data['totals']
-            
-            # Sector Row
-            sec_row = [sector.upper(), '', '', '', '', 
-                       totals['bv_str'], '', totals['mv_str'], f"{totals['vpl_cr']:,.2f}", totals['pl_pct_str']]
-            sec_row += [''] * (len(demat_names) + 4)
-            table_data.append(sec_row)
-            
-            tbl_style.append(('SPAN', (0, row_idx), (4, row_idx)))
+            # Sector row styling - no span on first two columns
             tbl_style.append(('BACKGROUND', (0, row_idx), (-1, row_idx), colors.lightgrey))
-            tbl_style.append(('ALIGN', (0, row_idx), (0, row_idx), 'LEFT')) # Sector Left
-            tbl_style.append(('ALIGN', (5, row_idx), (-1, row_idx), 'CENTER')) # Totals Center
-            tbl_style.append(('FONTSIZE', (0, row_idx), (-1, row_idx), 5))
-            tbl_style.append(('FONTNAME', (0, row_idx), (-1, row_idx), 'Helvetica-Bold'))
-            tbl_style.append(('TEXTCOLOR', (0, row_idx), (-1, row_idx), colors.black))
+            tbl_style.append(('FONTNAME', (2, row_idx), (2, row_idx), 'Helvetica-Bold'))
+            tbl_style.append(('FONTNAME', (5, row_idx), (5, row_idx), 'Helvetica-Bold'))
+            tbl_style.append(('FONTNAME', (7, row_idx), (9, row_idx), 'Helvetica-Bold'))
             row_idx += 1
 
-            for r in rows:
-                def fmt_num(n): return f"{n:,.0f}"
-                def fmt_cr(n): return f"{n:,.2f}"
-                row = [
-                    r['sn'], '', r['script'], fmt_num(r['qty']), fmt_num(r['wacc']), 
-                    fmt_cr(r['bv_cr']), fmt_num(r['ltp']), fmt_cr(r['mv_cr']), 
-                    fmt_cr(r['vpl_cr']), f"{r['pl_pct']:.1f}%"
-                ]
-                for bal in r['free_balances']: row.append(fmt_num(bal) if bal > 0 else "-")
-                row.extend([fmt_num(r['target_buy']), fmt_num(r['price_sale']), fmt_num(r['s2']), fmt_num(r['r2'])])
-                table_data.append(row)
-                
+            for r in data['rows']:
                 color = colors.red if r['pl_pct'] < 0 else colors.green
                 tbl_style.append(('TEXTCOLOR', (9, row_idx), (9, row_idx), color))
-                
-                # Highlight Free Balance
-                tbl_style.append(('BACKGROUND', (idx_free_start, row_idx), (idx_free_end-1, row_idx), colors.HexColor('#FDE9D9')))
-                tbl_style.append(('FONTNAME', (idx_free_start, row_idx), (idx_free_end-1, row_idx), 'Helvetica-Bold'))
+
+                tbl_style.append(('BACKGROUND', (idx_script, row_idx), (idx_script, row_idx), orange_color))
+                tbl_style.append(('FONTNAME', (idx_script, row_idx), (idx_script, row_idx), 'Helvetica-Bold'))
+
+                tbl_style.append(('BACKGROUND', (idx_free_start, row_idx), (idx_free_end, row_idx), orange_color))
+                tbl_style.append(('FONTNAME', (idx_free_start, row_idx), (idx_free_end, row_idx), 'Helvetica-Bold'))
+
+                tbl_style.append(('FONTNAME', (idx_transit, row_idx), (idx_transit, row_idx), 'Helvetica-Bold'))
+
                 row_idx += 1
 
-        grand_row = ['GRAND TOTAL', '', '', '', '', 
-                     f"{grand_bv_cr:,.2f}", '', f"{grand_mv_cr:,.2f}", f"{grand_vpl_cr:,.2f}", ""]
-        grand_row += [''] * (len(demat_names) + 4)
-        table_data.append(grand_row)
-        tbl_style.append(('SPAN', (0, row_idx), (4, row_idx)))
-        tbl_style.append(('FONTNAME', (0, row_idx), (-1, row_idx), 'Helvetica-Bold'))
+        # Grand total styling
         tbl_style.append(('BACKGROUND', (0, row_idx), (-1, row_idx), colors.black))
         tbl_style.append(('TEXTCOLOR', (0, row_idx), (-1, row_idx), colors.white))
-        tbl_style.append(('ALIGN', (0, row_idx), (0, row_idx), 'LEFT'))
+        tbl_style.append(('FONTNAME', (2, row_idx), (2, row_idx), 'Helvetica-Bold'))
+        tbl_style.append(('FONTNAME', (5, row_idx), (8, row_idx), 'Helvetica-Bold'))
 
-        main_table = Table(table_data, colWidths=col_widths, repeatRows=1)
+        # Build table
+        main_table = Table(table_data, colWidths=col_widths, repeatRows=2)
         main_table.setStyle(TableStyle(tbl_style))
-        elements.append(main_table)
 
+        auto_shrink_table(main_table, doc)
+
+        elements.append(main_table)
         doc.build(elements)
         return response
+    
+
+    
+#end
