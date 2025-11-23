@@ -1,0 +1,109 @@
+{% extends 'base.html' %}
+{% load humanize %}
+
+{% block title %}{{ title }} - Hathway Analytics{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h2 class="mb-4">{{ title }}</h2>
+
+        <div class="card shadow-sm mb-4">
+            <div class="card-body bg-light">
+                <form method="get" class="row g-3 align-items-end">
+                    <div class="col-md-3">
+                        <label for="date" class="form-label fw-bold">Date</label>
+                        <input type="date" class="form-control" id="date" name="date" 
+                               value="{{ selected_date_str }}" required>
+                    </div>
+
+                    <div class="col-md-3">
+                        <label for="symbol" class="form-label fw-bold">Symbol</label>
+                        <input type="text" class="form-control" id="symbol" name="symbol" 
+                               placeholder="e.g. NABIL" value="{{ symbol }}" required style="text-transform: uppercase;">
+                    </div>
+
+                    <div class="col-md-3">
+                        <label for="n_days" class="form-label fw-bold">N Day's</label>
+                        <input type="number" class="form-control" id="n_days" name="n_days" 
+                               placeholder="120" value="{{ n_days }}">
+                    </div>
+
+                    <div class="col-md-3">
+                        <button type="submit" class="btn btn-primary w-100">
+                            <i class="bi bi-filter"></i> Calculate
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        {% if error_message %}
+            <div class="alert alert-warning" role="alert">
+                {{ error_message }}
+            </div>
+        {% endif %}
+
+        {% if result %}
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-white py-3">
+                <h5 class="card-title mb-0 text-primary">
+                    Analysis Result (Last {{ result.actual_days_found }} Trading Days)
+                </h5>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-bordered table-striped table-hover mb-0 align-middle">
+                        <thead class="table-dark text-center">
+                            <tr>
+                                <th>SN</th>
+                                <th>Symbol</th>
+                                <th>Closing Price Average</th>
+                                <th>Total Traded Amount</th>
+                                <th>Total Traded Shares</th>
+                                <th>Total Trades</th>
+                                <th>Weighted Average</th>
+                                <th>Closing Price</th>
+                                <th>Closing Date</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr class="text-center">
+                                <td>1</td>
+                                <td class="fw-bold text-primary">{{ result.symbol }}</td>
+                                
+                                <td>{{ result.closing_price_avg|floatformat:2|intcomma }}</td>
+                                
+                                <td>{{ result.total_traded_amount|floatformat:2|intcomma }}</td>
+                                
+                                <td>{{ result.total_traded_shares|intcomma }}</td>
+                                
+                                <td>{{ result.total_trades|intcomma }}</td>
+                                
+                                <td class="fw-bold text-success">{{ result.weighted_average|floatformat:2|intcomma }}</td>
+                                
+                                <td>{{ result.closing_price|floatformat:2|intcomma }}</td>
+                                
+                                <td>{{ result.closing_date|date:"Y-m-d" }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Initialize Flatpickr for better date selection
+    flatpickr("#date", {
+        dateFormat: "Y-m-d",
+        maxDate: "today",
+        allowInput: true
+    });
+</script>
+{% endblock %}

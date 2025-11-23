@@ -2778,6 +2778,10 @@ def download_my_share_csv(request):
     return response
 # my_portfolio/views.py
 
+# my_portfolio/views.py
+
+# ... [Keep previous imports and functions] ...
+
 @login_required
 def generate_trading_sheet(request):
     """
@@ -2790,6 +2794,7 @@ def generate_trading_sheet(request):
     
     # --- A. PREPARE DATA ---
     
+    # 1. Get Latest Snapshot Date
     latest_snapshot = MeroShareHolding.objects.aggregate(Max('snapshot_date'))['snapshot_date__max']
     report_date = latest_snapshot if latest_snapshot else date.today()
     
@@ -2813,10 +2818,15 @@ def generate_trading_sheet(request):
         else: short_name = name_upper.split()[0][:5]
         demat_headers.append({'id': acc.id, 'name': short_name})
 
+    # --- CHANGED BLOCK START: Force Free Balance to use Latest Snapshot Only ---
     free_balance_map = defaultdict(dict)
-    ms_holdings = MeroShareHolding.objects.all()
-    for h in ms_holdings:
-        free_balance_map[h.symbol.script_ticker][h.demat_account.id] = h.free_balance
+    
+    if latest_snapshot:
+        # Filter explicitly by the latest available date
+        ms_holdings = MeroShareHolding.objects.filter(snapshot_date=latest_snapshot)
+        for h in ms_holdings:
+            free_balance_map[h.symbol.script_ticker][h.demat_account.id] = h.free_balance
+    # --- CHANGED BLOCK END ---
 
     # --- NEW: Calculate In-Transit (Buy) Shares (Morning Logic) ---
     wd = report_date.weekday() # Mon=0, Sun=6
@@ -2870,6 +2880,8 @@ def generate_trading_sheet(request):
             transit_map[t['symbol__script_ticker']] = t['total_buy']
     # -----------------------------------------------
 
+    # ... [Rest of the function logic for Technicals, Grouping, Excel, and PDF generation remains exactly the same] ...
+    
     technical_map = {}
     all_symbols = []
     for sector_data in raw_valuation_data.values():
@@ -3093,7 +3105,7 @@ def generate_trading_sheet(request):
         wb.save(response)
         return response
     
-# --- C. GENERATE PDF (Ultra-Compact Fit) ---
+    # --- C. GENERATE PDF (Ultra-Compact Fit) ---
     else:
         response = HttpResponse(content_type='application/pdf')
         response['Content-Disposition'] = f'attachment; filename="Trading_Sheet_{report_date}.pdf"'
@@ -3347,7 +3359,5 @@ def generate_trading_sheet(request):
         elements.append(main_table)
         doc.build(elements)
         return response
-    
-
 
 #end

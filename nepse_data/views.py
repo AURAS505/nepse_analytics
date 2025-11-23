@@ -19,6 +19,7 @@ from django.http import JsonResponse
 from django.db.models import Value
 from django.db.models.functions import Concat
 from .models import StockPrices, Indices, Marcap, FloorsheetRaw, DividendHistory, CompanyMetrics
+from django.db.models import Avg, Sum
 
 # This is the correct import for your FiscalYear model
 from nepali_datetime.models import FiscalYear, NepaliCalendar
@@ -1668,4 +1669,131 @@ def sync_dividends_to_adjustments(request):
         messages.error(request, f"An error occurred during sync: {e}")
 
     return redirect('nepse_data:data_entry')
+
+def n_days_average_view(request):
+    title = "N Day's Trading Average Price"
+    
+    # 1. Get Filters
+    selected_date_str = request.GET.get('date')
+    symbol = request.GET.get('symbol', '').strip().upper()
+    n_days_str = request.GET.get('n_days', '120')
+    
+    # 2. Parse Inputs
+    try:
+        n_days_input = int(n_days_str)
+        if n_days_input <= 0: raise ValueError
+    except ValueError:
+        n_days_input = 120
+        
+    query_date = None
+    if selected_date_str:
+        try:
+            query_date = datetime.date.fromisoformat(selected_date_str)
+        except ValueError:
+            query_date = None
+            
+    # Default to latest date if none selected
+    if not query_date:
+        latest = StockPrices.objects.aggregate(max_date=Max('business_date'))
+        query_date = latest['max_date']
+        if query_date:
+            selected_date_str = query_date.isoformat()
+    
+    result_data = None
+    error_message = None
+    
+    if symbol and query_date:
+        # --- NEPSE LOGIC: N+1 Formula ---
+        # For Nth day, NEPSE averages (N+1) closing prices
+        # This includes N trading days PLUS one reference day before
+        
+        # Step 1: Fetch N+1 trading days counting backward from query_date
+        required_count = n_days_input + 1
+        
+        trading_records = StockPrices.objects.filter(
+            symbol=symbol,
+            business_date__lte=query_date
+        ).order_by('-business_date')[:required_count]
+        
+        records_list = list(trading_records)
+        
+        if len(records_list) < required_count:
+            # Not enough data, use what we have
+            if len(records_list) == 0:
+                error_message = f"No data found for {symbol} on or before {selected_date_str}"
+            else:
+                # Partial data available
+                count = len(records_list)
+                sum_close_price = sum(d.close_price or Decimal('0') for d in records_list)
+                closing_price_avg = sum_close_price / count if count > 0 else Decimal('0')
+                
+                # Calculate other metrics
+                total_traded_amount = sum(d.total_traded_value or Decimal('0') for d in records_list)
+                total_traded_shares = sum(d.total_traded_quantity or 0 for d in records_list)
+                total_trades = sum(d.total_trades or 0 for d in records_list)
+                
+                weighted_avg = Decimal('0')
+                if total_traded_shares > 0:
+                    weighted_avg = total_traded_amount / total_traded_shares
+                
+                latest_record = records_list[0]
+                
+                result_data = {
+                    'symbol': symbol,
+                    'closing_price_avg': round(closing_price_avg, 2),
+                    'total_traded_amount': total_traded_amount,
+                    'total_traded_shares': total_traded_shares,
+                    'total_trades': total_trades,
+                    'weighted_average': round(weighted_avg, 2),
+                    'closing_price': latest_record.close_price,
+                    'closing_date': latest_record.business_date,
+                    'actual_trading_days': count - 1,  # Minus the reference day
+                    'requested_days': n_days_input,
+                    'note': f'Only {count-1} trading days available (requested {n_days_input})'
+                }
+        else:
+            # Step 2: Calculate average using N+1 prices
+            count = len(records_list)
+            sum_close_price = sum(d.close_price or Decimal('0') for d in records_list)
+            closing_price_avg = sum_close_price / count if count > 0 else Decimal('0')
+            
+            # Step 3: Calculate other metrics (using all N+1 days)
+            total_traded_amount = sum(d.total_traded_value or Decimal('0') for d in records_list)
+            total_traded_shares = sum(d.total_traded_quantity or 0 for d in records_list)
+            total_trades = sum(d.total_trades or 0 for d in records_list)
+            
+            # Weighted Average
+            weighted_avg = Decimal('0')
+            if total_traded_shares > 0:
+                weighted_avg = total_traded_amount / total_traded_shares
+            
+            # Latest record (most recent date)
+            latest_record = records_list[0]
+            
+            result_data = {
+                'symbol': symbol,
+                'closing_price_avg': round(closing_price_avg, 2),  # NEPSE formula: avg of N+1 days
+                'total_traded_amount': total_traded_amount,
+                'total_traded_shares': total_traded_shares,
+                'total_trades': total_trades,
+                'weighted_average': round(weighted_avg, 2),
+                'closing_price': latest_record.close_price,
+                'closing_date': latest_record.business_date,
+                'actual_trading_days': n_days_input,
+                'requested_days': n_days_input,
+                'total_days_in_calculation': count
+            }
+    
+    context = {
+        'title': title,
+        'selected_date_str': selected_date_str,
+        'symbol': symbol,
+        'n_days': n_days_input,
+        'result': result_data,
+        'error_message': error_message
+    }
+    
+    return render(request, 'nepse_data/n_days_average.html', context)
+
+
 # --- *** END OF NEW VIEW *** ---

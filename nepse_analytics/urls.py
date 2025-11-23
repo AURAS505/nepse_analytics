@@ -17,5 +17,6 @@ urlpatterns = [
     path('floorsheet/', include('floorsheet_analysis.urls')),
     path('technical/', include('technical_analysis.urls')),
     path('portfolio/', include('my_portfolio.urls')),
+    path('accounting/', include('accounting_desk.urls')), 
     
 ]

@@ -1,0 +1,387 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}Accounting Desk - Hathway Analytics{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* --- INHERITED STYLES --- */
+    body {
+        font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+        font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    }
+    
+    .display-4 { font-weight: 700; letter-spacing: -0.02em; }
+    
+    /* Metric Cards */
+    .metric-card {
+        border: none;
+        border-radius: 12px;
+        transition: all 0.3s ease;
+        background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .metric-card::before {
+        content: '';
+        position: absolute;
+        top: 0; left: 0; right: 0; height: 4px;
+        background: linear-gradient(90deg, var(--accent-color), var(--accent-light));
+    }
+    
+    .metric-card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 12px 24px rgba(0,0,0,0.15) !important;
+    }
+    
+    /* Accounting Specific Colors */
+    .metric-card.card-cash::before { --accent-color: #0dcaf0; --accent-light: #70e4ff; } 
+    .metric-card.card-receivable::before { --accent-color: #198754; --accent-light: #52c27a; } 
+    .metric-card.card-payable::before { --accent-color: #dc3545; --accent-light: #e4606d; } 
+    .metric-card.card-equity::before { --accent-color: #212529; --accent-light: #495057; } 
+    
+    .metric-icon-wrapper {
+        width: 64px; height: 64px;
+        display: flex; align-items: center; justify-content: center;
+        border-radius: 12px; margin: 0 auto 1rem;
+    }
+    
+    .bg-cash-subtle { background: linear-gradient(135deg, #cff4fc 0%, #e0faff 100%); }
+    .bg-receivable-subtle { background: linear-gradient(135deg, #d1e7dd 0%, #e8f5e9 100%); }
+    .bg-payable-subtle { background: linear-gradient(135deg, #f8d7da 0%, #fdeced 100%); }
+    .bg-equity-subtle { background: linear-gradient(135deg, #e9ecef 0%, #f8f9fa 100%); }
+
+    .metric-value { font-size: 2rem; font-weight: 700; line-height: 1.2; margin-bottom: 0.5rem; }
+    .metric-label { font-size: 0.95rem; font-weight: 600; color: #495057; margin-bottom: 0.25rem; }
+    .metric-sublabel { font-size: 0.8rem; color: #6c757d; }
+    
+    /* --- WELCOME CARD (Header) --- */
+    .welcome-card {
+        background: linear-gradient(135deg, #4b6cb7 0%, #182848 100%); /* Deep Blue Theme */
+        border: none;
+        border-radius: 16px;
+        color: white;
+    }
+    
+    .welcome-card .btn-light {
+        border-radius: 8px; font-weight: 600; padding: 12px 24px;
+        transition: all 0.3s ease;
+        color: #182848;
+    }
+    
+    .welcome-card .btn-light:hover {
+        transform: translateY(-2px); 
+        box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+        background-color: #f8f9fa;
+    }
+    
+    /* --- GRID ACTION BUTTONS (Lower Section) --- */
+    .action-btn {
+        border-radius: 12px;
+        border: 2px solid;
+        transition: all 0.3s ease;
+        font-weight: 600;
+        padding: 1.25rem 1rem;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-decoration: none;
+    }
+    
+    .action-btn:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 8px 16px rgba(0,0,0,0.15);
+    }
+    
+    .action-icon {
+        font-size: 2rem;
+        margin-bottom: 0.5rem;
+        display: block;
+    }
+
+    /* Table Styling */
+    .modern-table { font-size: 0.875rem; border-collapse: separate; border-spacing: 0; }
+    .modern-table thead th {
+        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+        font-weight: 600; text-transform: uppercase; font-size: 0.75rem;
+        letter-spacing: 0.05em; color: #495057; border-bottom: 2px solid #dee2e6;
+        padding: 1rem 0.75rem; white-space: nowrap;
+    }
+    .modern-table tbody tr:hover { background-color: #f8f9fa; transform: scale(1.01); box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+    .modern-table tbody td { padding: 0.875rem 0.75rem; vertical-align: middle; border-bottom: 1px solid #e9ecef; }
+    
+    .dr-amount { color: #dc3545; font-weight: 500; }
+    .cr-amount { color: #198754; font-weight: 500; }
+    .account-badge { font-size: 0.75rem; padding: 0.25rem 0.5rem; border-radius: 4px; background-color: #e9ecef; color: #495057; font-weight: 600; border: 1px solid #dee2e6; }
+    
+    /* Section Headers */
+    .section-card { border: none; border-radius: 12px; overflow: hidden; }
+    .section-header {
+        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+        border-bottom: 3px solid #dee2e6; padding: 1rem 1.5rem;
+    }
+    .section-header h5 { font-weight: 700; margin: 0; color: #212529; }
+    
+    /* Responsive */
+    @media (max-width: 768px) {
+        .action-icon { font-size: 1.5rem; }
+        .action-btn { padding: 1rem 0.5rem; font-size: 0.8rem; }
+    }
+</style>
+{% endblock %}
+
+{% block title_header %}
+<i class="bi bi-calculator"></i> Accounting Desk
+{% endblock %}
+
+{% block content %}
+
+{# --- 1. WELCOME SECTION (With Buttons) --- #}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card welcome-card card-body p-5 shadow-lg">
+            <h1 class="display-4 fw-bold mb-3">
+                <i class="bi bi-journal-richtext"></i> Welcome Back, Accountants
+            </h1>
+            <p class="lead mb-4 opacity-90">Manage your cash flow, track dividends, record expenses, and reconcile broker payments.</p>
+            
+            {# HEADER BUTTONS #}
+            <div class="d-flex gap-3 flex-wrap">
+                <a href="#" class="btn btn-light btn-lg shadow" title="Record Fees/Charges">
+                    <i class="bi bi-receipt-cutoff me-2"></i> Record Expense
+                </a>
+                <a href="#" class="btn btn-light btn-lg shadow" title="Record Cash Dividend">
+                    <i class="bi bi-piggy-bank me-2"></i> Record Income
+                </a>
+                <a href="#" class="btn btn-light btn-lg shadow" title="Bank to Broker / Broker to Bank">
+                    <i class="bi bi-arrow-left-right me-2"></i> Cash Transfer
+                </a>
+                <a href="#" class="btn btn-light btn-lg shadow" title="General Journal Entry">
+                    <i class="bi bi-pencil-square me-2"></i> Journal Entry
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# --- 2. KEY METRICS CARDS --- #}
+<div class="row row-cols-1 row-cols-md-2 row-cols-lg-4 g-4 mb-4">
+    {# CASH #}
+    <div class="col">
+        <div class="card metric-card card-cash h-100 shadow-sm">
+            <div class="card-body text-center p-4">
+                <div class="metric-icon-wrapper bg-cash-subtle">
+                    <i class="bi bi-wallet2 text-info" style="font-size: 2rem;"></i>
+                </div>
+                <div class="metric-value text-info">{{ account_stats.total_cash|floatformat:2|intcomma }}</div>
+                <div class="metric-label">Cash Position</div>
+                <div class="metric-sublabel">Liquid Cash in Banks</div>
+            </div>
+        </div>
+    </div>
+
+    {# RECEIVABLES #}
+    <div class="col">
+        <div class="card metric-card card-receivable h-100 shadow-sm">
+            <div class="card-body text-center p-4">
+                <div class="metric-icon-wrapper bg-receivable-subtle">
+                    <i class="bi bi-box-arrow-in-down-left text-success" style="font-size: 2rem;"></i>
+                </div>
+                <div class="metric-value text-success">{{ account_stats.total_receivables|floatformat:2|intcomma }}</div>
+                <div class="metric-label">Receivables</div>
+                <div class="metric-sublabel">Pending from Sales</div>
+            </div>
+        </div>
+    </div>
+
+    {# PAYABLES #}
+    <div class="col">
+        <div class="card metric-card card-payable h-100 shadow-sm">
+            <div class="card-body text-center p-4">
+                <div class="metric-icon-wrapper bg-payable-subtle">
+                    <i class="bi bi-box-arrow-up-right text-danger" style="font-size: 2rem;"></i>
+                </div>
+                <div class="metric-value text-danger">{{ account_stats.total_payables|floatformat:2|intcomma }}</div>
+                <div class="metric-label">Payables</div>
+                <div class="metric-sublabel">Pending for Purchases</div>
+            </div>
+        </div>
+    </div>
+
+    {# NET EQUITY #}
+    <div class="col">
+        <div class="card metric-card card-equity h-100 shadow-sm">
+            <div class="card-body text-center p-4">
+                <div class="metric-icon-wrapper bg-equity-subtle">
+                    <i class="bi bi-safe text-dark" style="font-size: 2rem;"></i>
+                </div>
+                <div class="metric-value text-dark">{{ account_stats.net_equity_crore|floatformat:2 }} CR</div>
+                <div class="metric-label">Net Equity</div>
+                <div class="metric-sublabel">Portfolio + Cash - Debt</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# --- 3. QUICK ACTIONS GRID (LOWER SECTION) --- #}
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card section-card shadow-sm">
+            <div class="section-header">
+                <h5><i class="bi bi-lightning-charge-fill text-warning me-2"></i> Quick Actions</h5>
+            </div>
+            <div class="card-body p-4">
+                <div class="row g-3">
+                    
+                    <div class="col-6 col-md-4 col-lg-2">
+                        <a href="#" class="btn btn-outline-danger action-btn w-100">
+                            <i class="bi bi-receipt action-icon"></i>
+                            <div>Record Expense</div>
+                        </a>
+                    </div>
+
+                    <div class="col-6 col-md-4 col-lg-2">
+                        <a href="#" class="btn btn-outline-success action-btn w-100">
+                            <i class="bi bi-cash-coin action-icon"></i>
+                            <div>Record Income</div>
+                        </a>
+                    </div>
+
+                    <div class="col-6 col-md-4 col-lg-2">
+                        <a href="#" class="btn btn-outline-primary action-btn w-100">
+                            <i class="bi bi-arrow-left-right action-icon"></i>
+                            <div>Cash Transfer</div>
+                        </a>
+                    </div>
+
+                    <div class="col-6 col-md-4 col-lg-2">
+                        <a href="{% url 'accounting_desk:bank_loan_report' %}" class="btn btn-outline-secondary action-btn w-100">
+                            <i class="bi bi-bank action-icon"></i>
+                            <div>Bank Loan Report</div>
+                        </a>
+                    </div>
+
+                    <div class="col-6 col-md-4 col-lg-2">
+                        <a href="#" class="btn btn-outline-info action-btn w-100">
+                            <i class="bi bi-bank2 action-icon"></i>
+                            <div>Add Account</div>
+                        </a>
+                    </div>
+
+                    <div class="col-6 col-md-4 col-lg-2">
+                        <a href="#" class="btn btn-outline-dark action-btn w-100">
+                            <i class="bi bi-file-earmark-spreadsheet action-icon"></i>
+                            <div>Export Ledger</div>
+                        </a>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# --- 4. RECENT LEDGER ENTRIES TABLE --- #}
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card section-card shadow-sm">
+            <div class="section-header d-flex justify-content-between align-items-center">
+                <h5><i class="bi bi-list-check text-secondary me-2"></i> Recent Ledger Entries</h5>
+                <a href="#" class="btn btn-sm btn-outline-dark">View Full Ledger</a>
+            </div>
+            <div class="table-responsive">
+                <table class="table modern-table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th class="text-start">Date</th>
+                            <th class="text-start">Ref ID</th>
+                            <th class="text-start">Account Head</th>
+                            <th class="text-start">Description</th>
+                            <th class="text-end">Debit (Dr)</th>
+                            <th class="text-end">Credit (Cr)</th>
+                            <th class="text-end">Balance</th>
+                            <th class="text-center">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for entry in ledger_entries %}
+                        <tr>
+                            <td class="text-start text-muted">{{ entry.date|date:"Y-m-d" }}</td>
+                            <td class="text-start"><small class="text-secondary font-monospace">{{ entry.ref_id }}</small></td>
+                            <td class="text-start"><span class="account-badge">{{ entry.account_name }}</span></td>
+                            <td class="text-start text-truncate" style="max-width: 250px;" title="{{ entry.description }}">{{ entry.description }}</td>
+                            <td class="text-end">
+                                {% if entry.type == 'DR' %}<span class="dr-amount">{{ entry.amount|floatformat:2|intcomma }}</span>{% else %}<span class="text-muted">-</span>{% endif %}
+                            </td>
+                            <td class="text-end">
+                                {% if entry.type == 'CR' %}<span class="cr-amount">{{ entry.amount|floatformat:2|intcomma }}</span>{% else %}<span class="text-muted">-</span>{% endif %}
+                            </td>
+                            <td class="text-end fw-bold text-dark">{{ entry.running_balance|floatformat:2|intcomma }}</td>
+                            <td class="text-center">
+                                <a href="#" class="btn btn-sm btn-light text-secondary border rounded-circle"><i class="bi bi-eye"></i></a>
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="8" class="text-center p-5 text-muted">No entries found.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# --- 5. BOTTOM PANELS --- #}
+<div class="row mt-4 mb-5">
+    <div class="col-lg-6">
+        <div class="card section-card shadow-sm h-100">
+            <div class="section-header">
+                <h6><i class="bi bi-pie-chart-fill text-secondary me-2"></i> This Month's Expenses</h6>
+            </div>
+            <div class="card-body">
+                <table class="table table-sm table-borderless align-middle">
+                    <tbody>
+                        {% for exp in expense_summary %}
+                        <tr>
+                            <td><i class="bi bi-dot text-danger"></i> {{ exp.category }}</td>
+                            <td class="text-end fw-semibold">{{ exp.total|floatformat:2|intcomma }}</td>
+                            <td class="text-end" style="width: 30%;">
+                                <div class="progress" style="height: 6px;">
+                                    <div class="progress-bar bg-secondary" role="progressbar" style="width: {{ exp.percentage }}%"></div>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-6">
+        <div class="card section-card shadow-sm h-100">
+            <div class="section-header">
+                <h6><i class="bi bi-hourglass-split text-warning me-2"></i> Pending Settlements</h6>
+            </div>
+            <div class="list-group list-group-flush">
+                {% for item in pending_settlements %}
+                <div class="list-group-item d-flex justify-content-between align-items-center px-4 py-3">
+                    <div>
+                        <div class="fw-bold text-dark">{{ item.broker_name }}</div>
+                        <small class="text-muted">Due: {{ item.due_date }}</small>
+                    </div>
+                    <div class="text-end">
+                        <div class="fw-bold {% if item.type == 'PAYABLE' %}text-danger{% else %}text-success{% endif %}">
+                            {% if item.type == 'PAYABLE' %}-{% else %}+{% endif %} {{ item.amount|floatformat:2|intcomma }}
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}

@@ -35,4 +35,5 @@ urlpatterns = [
     path('company-lookup/', views.company_lookup_json_view, name='company_lookup_json'),
     path('dividend/search/', views.search_dividends_json_view, name='search_dividends_json'),
     path('download-metrics-sample/', views.download_metrics_sample_view, name='download_metrics_sample'),
+    path('n-days-average/', views.n_days_average_view, name='n_days_average'),
 ]

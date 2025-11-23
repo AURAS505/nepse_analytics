@@ -59,7 +59,9 @@ INSTALLED_APPS = [
     'floorsheet_analysis.apps.FloorsheetAnalysisConfig',
     'technical_analysis.apps.TechnicalAnalysisConfig',
     'my_portfolio.apps.MyPortfolioConfig',
+    'accounting_desk.apps.AccountingDeskConfig', 
     'nepali_datetime',
+    
     
 ]
 
