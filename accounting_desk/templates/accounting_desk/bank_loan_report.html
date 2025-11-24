@@ -1,57 +1,134 @@
 {% extends 'base.html' %}
 {% load static %}
+{% load humanize %}
 
-{% block title %}Bank Loan Management - Share Margin Financing{% endblock %}
+{% block title %}Bank Loan Dashboard{% endblock %}
 
-{% block extra_css %}
+{% block styles %}
 <style>
-    .loan-card {
-        border-left: 4px solid #007bff;
+    :root {
+        --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        --success-gradient: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+        --warning-gradient: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        --info-gradient: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+    }
+    
+    .summary-card {
+        background: white;
+        border-radius: 15px;
+        padding: 25px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
         transition: all 0.3s ease;
     }
-    .loan-card:hover {
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    
+    .summary-card:hover {
+        box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+        transform: translateY(-2px);
     }
-    .metric-box {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
+    
+    .bank-summary-row {
+        background: #f8f9fa;
+        padding: 15px;
+        margin-bottom: 10px;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.2s;
+        border-left: 4px solid #007bff;
+    }
+    
+    .bank-summary-row:hover {
+        background: #e9ecef;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    
+    .utilization-bar {
+        height: 8px;
+        background: #e9ecef;
         border-radius: 10px;
-        padding: 20px;
+        overflow: hidden;
+        margin-top: 8px;
+    }
+    
+    .utilization-fill {
+        height: 100%;
+        transition: width 0.3s ease;
+    }
+    
+    .status-badge {
+        padding: 6px 12px;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        font-weight: 600;
+    }
+    
+    .modal-header {
+        background: var(--primary-gradient);
+        color: white;
+        border-radius: 8px 8px 0 0;
+    }
+    
+    .action-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: white;
+        padding: 15px;
+        border-radius: 12px;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.05);
         margin-bottom: 20px;
     }
-    .metric-value {
-        font-size: 2rem;
-        font-weight: bold;
+
+    .tool-group {
+        display: flex;
+        gap: 8px;
     }
-    .metric-label {
-        font-size: 0.9rem;
-        opacity: 0.9;
+    
+    .btn-gradient {
+        background: var(--primary-gradient);
+        color: white;
+        border: none;
+        padding: 10px 24px;
+        border-radius: 8px;
+        font-weight: 500;
+        transition: all 0.3s;
     }
-    .progress-custom {
-        height: 25px;
-        border-radius: 10px;
-    }
-    .badge-expiry {
-        padding: 8px 12px;
-        border-radius: 20px;
-    }
-    .table-scrips {
-        font-size: 0.9rem;
-    }
-    .modal-header {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    
+    .btn-gradient:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
         color: white;
     }
-    .btn-action {
-        border-radius: 20px;
-        padding: 8px 20px;
+    
+    .quick-stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 15px;
+        margin-bottom: 20px;
     }
-    .rate-badge {
-        background: #28a745;
-        color: white;
-        padding: 5px 15px;
-        border-radius: 15px;
+    
+    .stat-item {
+        background: white;
+        padding: 15px;
+        border-radius: 8px;
+        border-left: 4px solid #007bff;
+    }
+    
+    .stat-value {
+        font-size: 1.5rem;
         font-weight: bold;
+        color: #333;
+    }
+    
+    .stat-label {
+        font-size: 0.8rem;
+        color: #666;
+        text-transform: uppercase;
+    }
+    
+    .detail-table th {
+        background: #f8f9fa;
+        font-weight: 600;
+        border-bottom: 2px solid #dee2e6;
     }
 </style>
 {% endblock %}
@@ -59,303 +136,190 @@
 {% block content %}
 <div class="container-fluid py-4">
     
-    <!-- Page Header -->
-    <div class="row mb-4">
-        <div class="col-md-8">
-            <h2 class="mb-0"><i class="fas fa-university"></i> Bank Loan Management</h2>
-            <p class="text-muted">Share Margin Financing & Collateral Tracking</p>
+    <div class="action-header">
+        <div>
+            <h2 class="mb-0"><i class="fas fa-university"></i> Bank Loan Dashboard</h2>
+            <p class="text-muted mb-0">Monitor Sanctioned Limits & Drawing Power</p>
         </div>
-        <div class="col-md-4 text-end">
-            <button class="btn btn-primary btn-action me-2" data-bs-toggle="modal" data-bs-target="#addLoanModal">
-                <i class="fas fa-plus-circle"></i> Add Loan Facility
+        <div class="tool-group">
+            <button type="button" class="btn btn-outline-primary" onclick="syncAllLoans()">
+                <i class="fas fa-sync-alt"></i> Sync Valuations
             </button>
+            
+            <button type="button" class="btn btn-outline-success" onclick="openAddLoanModal()">
+                <i class="fas fa-plus-circle"></i> New Loan
+            </button>
+            
+            <a href="{% url 'accounting_desk:pledge_entry_sheet' %}" class="btn btn-gradient">
+                <i class="fas fa-file-signature"></i> Pledge Entry Sheet
+            </a>
         </div>
     </div>
 
-    <!-- Grand Totals Dashboard -->
-    <div class="row mb-4">
-        <div class="col-md-3">
-            <div class="metric-box" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
-                <div class="metric-label">Total Sanctioned Limit</div>
-                <div class="metric-value">Rs. {{ grand_totals.total_sanctioned|floatformat:0|default:"0" }}</div>
-            </div>
+    <div class="quick-stats">
+        <div class="stat-item">
+            <div class="stat-label">Total Sanctioned</div>
+            <div class="stat-value">Rs. {{ grand_totals.total_sanctioned|floatformat:0|intcomma }}</div>
         </div>
-        <div class="col-md-3">
-            <div class="metric-box" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
-                <div class="metric-label">Total Drawing Power</div>
-                <div class="metric-value">Rs. {{ grand_totals.total_drawing_power|floatformat:0|default:"0" }}</div>
-            </div>
+        <div class="stat-item" style="border-left-color: #28a745;">
+            <div class="stat-label">Total Drawing Power</div>
+            <div class="stat-value text-success">Rs. {{ grand_totals.total_drawing_power|floatformat:0|intcomma }}</div>
         </div>
-        <div class="col-md-3">
-            <div class="metric-box" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
-                <div class="metric-label">Total Used Amount</div>
-                <div class="metric-value">Rs. {{ grand_totals.total_used|floatformat:0|default:"0" }}</div>
-            </div>
+        <div class="stat-item" style="border-left-color: #dc3545;">
+            <div class="stat-label">Total Utilized</div>
+            <div class="stat-value text-danger">Rs. {{ grand_totals.total_used|floatformat:0|intcomma }}</div>
         </div>
-        <div class="col-md-3">
-            <div class="metric-box" style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);">
-                <div class="metric-label">Available Headroom</div>
-                <div class="metric-value">Rs. {{ grand_totals.total_headroom|floatformat:0|default:"0" }}</div>
-            </div>
+        <div class="stat-item" style="border-left-color: #17a2b8;">
+            <div class="stat-label">Available Headroom</div>
+            <div class="stat-value text-info">Rs. {{ grand_totals.total_headroom|floatformat:0|intcomma }}</div>
+        </div>
+        <div class="stat-item" style="border-left-color: #ffc107;">
+            <div class="stat-label">Collateral Value</div>
+            <div class="stat-value text-warning">Rs. {{ grand_totals.total_collateral_value|floatformat:0|intcomma }}</div>
         </div>
     </div>
 
-    <!-- Loan Facilities -->
-    {% for loan in loans %}
-    <div class="card loan-card mb-4">
-        <div class="card-header bg-light">
+    <div class="summary-card mb-4">
+        <h5 class="mb-3"><i class="fas fa-list"></i> Loan Facilities Overview</h5>
+        
+        {% for loan in loans %}
+        <div class="bank-summary-row" onclick="showLoanDetails({{ loan.id }})">
             <div class="row align-items-center">
-                <div class="col-md-4">
-                    <h5 class="mb-0"><i class="fas fa-building"></i> {{ loan.bank_name }}</h5>
+                <div class="col-md-3">
+                    <h6 class="mb-1"><i class="fas fa-building"></i> {{ loan.bank_name }}</h6>
                     <small class="text-muted">A/C: {{ loan.account_number }}</small>
                 </div>
-                <div class="col-md-3">
-                    <strong>Sanctioned:</strong> Rs. {{ loan.sanctioned_limit|floatformat:0 }}<br>
-                    <strong>Drawing Power:</strong> Rs. {{ loan.calculated_dp|floatformat:0 }}
+                <div class="col-md-2 text-center">
+                    <div class="stat-label">Sanctioned</div>
+                    <div class="stat-value" style="font-size: 1.1rem;">Rs. {{ loan.sanctioned_limit|floatformat:0|intcomma }}</div>
                 </div>
-                <div class="col-md-2">
-                    <span class="rate-badge">{{ loan.active_rate|floatformat:2 }}%</span>
+                <div class="col-md-2 text-center">
+                    <div class="stat-label">Drawing Power</div>
+                    <div class="stat-value text-success" style="font-size: 1.1rem;">Rs. {{ loan.calculated_dp|floatformat:0|intcomma }}</div>
                 </div>
-                <div class="col-md-3 text-end">
-                    {% if loan.days_to_expiry < 30 and loan.days_to_expiry > 0 %}
-                        <span class="badge badge-expiry bg-warning text-dark">
-                            <i class="fas fa-exclamation-triangle"></i> Expires in {{ loan.days_to_expiry }} days
-                        </span>
-                    {% elif loan.days_to_expiry <= 0 %}
-                        <span class="badge badge-expiry bg-danger">
-                            <i class="fas fa-times-circle"></i> EXPIRED
-                        </span>
-                    {% else %}
-                        <span class="badge badge-expiry bg-success">
-                            <i class="fas fa-check-circle"></i> {{ loan.days_to_expiry }} days left
-                        </span>
-                    {% endif %}
+                <div class="col-md-2 text-center">
+                    <div class="stat-label">Utilized</div>
+                    <div class="stat-value" style="font-size: 1.1rem;">Rs. {{ loan.current_used_amount|floatformat:0|intcomma }}</div>
                 </div>
-            </div>
-        </div>
-        
-        <div class="card-body">
-            <!-- Utilization Progress Bar -->
-            <div class="mb-3">
-                <div class="d-flex justify-content-between mb-1">
-                    <span><strong>Utilization:</strong> Rs. {{ loan.current_used_amount|floatformat:0 }}</span>
-                    <span class="{% if loan.utilization_percent > 90 %}text-danger{% elif loan.utilization_percent > 75 %}text-warning{% else %}text-success{% endif %}">
+                <div class="col-md-2 text-center">
+                    <span class="status-badge {% if loan.utilization_percent > 90 %}bg-danger{% elif loan.utilization_percent > 75 %}bg-warning{% else %}bg-success{% endif %}">
                         {{ loan.utilization_percent|floatformat:1 }}%
                     </span>
-                </div>
-                <div class="progress progress-custom">
-                    <div class="progress-bar {% if loan.utilization_percent > 90 %}bg-danger{% elif loan.utilization_percent > 75 %}bg-warning{% else %}bg-success{% endif %}" 
-                         role="progressbar" 
-                         style="width: {{ loan.utilization_percent }}%">
+                    <div class="utilization-bar">
+                        <div class="utilization-fill {% if loan.utilization_percent > 90 %}bg-danger{% elif loan.utilization_percent > 75 %}bg-warning{% else %}bg-success{% endif %}" 
+                             style="width: {{ loan.utilization_percent }}%"></div>
                     </div>
                 </div>
-                <small class="text-muted">Headroom Available: Rs. {{ loan.headroom|floatformat:0 }}</small>
+                <div class="col-md-1 text-end">
+                    <i class="fas fa-chevron-right"></i>
+                </div>
             </div>
+        </div>
+        {% empty %}
+        <div class="alert alert-info text-center">
+            <i class="fas fa-info-circle fa-2x mb-2"></i>
+            <p>No loan facilities found. Click "New Loan" to add one.</p>
+        </div>
+        {% endfor %}
+    </div>
 
-            <!-- Pledged Securities Table -->
-            <div class="table-responsive">
-                <table class="table table-sm table-scrips table-hover">
-                    <thead class="table-dark">
-                        <tr>
-                            <th>Symbol</th>
-                            <th>Demat A/C</th>
-                            <th class="text-end">Quantity</th>
-                            <th class="text-end">LTP</th>
-                            <th class="text-end">Market Value</th>
-                            <th class="text-end">Avg Price ({{ loan.cached_scrips.0.average_price_days|default:"180" }}d)</th>
-                            <th class="text-end">Margin %</th>
-                            <th class="text-end">Drawing Power</th>
-                            <th>Pledged Date</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for scrip in loan.cached_scrips %}
-                        <tr>
-                            <td><strong>{{ scrip.symbol }}</strong></td>
-                            <td><small>{{ scrip.demat_account.capital_name|default:"N/A" }}</small></td>
-                            <td class="text-end">{{ scrip.quantity }}</td>
-                            <td class="text-end">Rs. {{ scrip.ltp|floatformat:2 }}</td>
-                            <td class="text-end"><strong>Rs. {{ scrip.current_value|floatformat:0 }}</strong></td>
-                            <td class="text-end">Rs. {{ scrip.average_price|floatformat:2 }}</td>
-                            <td class="text-end">{{ scrip.valuation_percent|floatformat:0 }}%</td>
-                            <td class="text-end text-success"><strong>Rs. {{ scrip.current_dp|floatformat:0 }}</strong></td>
-                            <td>{{ scrip.pledged_date|date:"d M, Y" }}</td>
-                        </tr>
-                        {% empty %}
-                        <tr>
-                            <td colspan="9" class="text-center text-muted">No pledged securities yet</td>
-                        </tr>
+</div>
+
+<div class="modal fade" id="loanDetailsModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-info-circle"></i> Pledged Securities (Inventory)</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="loanDetailsContent">
+                
+                <div class="alert alert-light border">
+                    <i class="fas fa-info-circle"></i> To Add/Release Pledges or update Loan Usage, please use the 
+                    <a href="{% url 'accounting_desk:pledge_entry_sheet' %}" class="fw-bold">Pledge Entry Sheet</a>.
+                </div>
+
+                <div class="mb-3">
+                    <select id="bankFilter" class="form-select w-auto" onchange="filterLoanDetails()">
+                        <option value="all">All Banks</option>
+                        {% for loan in loans %}
+                        <option value="{{ loan.id }}">{{ loan.bank_name }}</option>
                         {% endfor %}
-                    </tbody>
-                    <tfoot class="table-secondary">
-                        <tr>
-                            <td colspan="4" class="text-end"><strong>Total:</strong></td>
-                            <td class="text-end"><strong>Rs. {{ loan.calculated_collateral|floatformat:0 }}</strong></td>
-                            <td colspan="2"></td>
-                            <td class="text-end"><strong>Rs. {{ loan.calculated_dp|floatformat:0 }}</strong></td>
-                            <td></td>
-                        </tr>
-                    </tfoot>
-                </table>
-            </div>
+                    </select>
+                </div>
 
-            <!-- Action Buttons -->
-            <div class="mt-3">
-                <button class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#addPledgeModal" onclick="setLoanForPledge({{ loan.id }})">
-                    <i class="fas fa-plus"></i> Add Pledge
-                </button>
-                <button class="btn btn-sm btn-info" data-bs-toggle="modal" data-bs-target="#addRateModal" onclick="setLoanForRate({{ loan.id }})">
-                    <i class="fas fa-percent"></i> Update Interest Rate
-                </button>
-                <button class="btn btn-sm btn-secondary" data-bs-toggle="collapse" data-bs-target="#rateHistory{{ loan.id }}">
-                    <i class="fas fa-history"></i> View Rate History
-                </button>
-            </div>
-
-            <!-- Rate History (Collapsible) -->
-            <div class="collapse mt-3" id="rateHistory{{ loan.id }}">
-                <div class="card">
-                    <div class="card-body">
-                        <h6>Interest Rate History</h6>
-                        <table class="table table-sm">
-                            <thead>
-                                <tr>
-                                    <th>Effective Date</th>
-                                    <th>End Date</th>
-                                    <th>Base Rate</th>
-                                    <th>Premium</th>
-                                    <th>Total Rate</th>
-                                    <th>Remarks</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for hist in loan.interest_history.all %}
-                                <tr>
-                                    <td>{{ hist.effective_date|date:"d M, Y" }}</td>
-                                    <td>{{ hist.end_date|date:"d M, Y"|default:"Ongoing" }}</td>
-                                    <td>{{ hist.base_rate }}%</td>
-                                    <td>{{ hist.premium }}%</td>
-                                    <td><strong>{{ hist.rate }}%</strong></td>
-                                    <td>{{ hist.remarks }}</td>
-                                </tr>
-                                {% empty %}
-                                <tr>
-                                    <td colspan="6" class="text-center text-muted">No rate history</td>
+                <div class="table-responsive">
+                    <table class="table detail-table table-hover">
+                        <thead>
+                            <tr>
+                                <th>Bank</th>
+                                <th>Symbol</th>
+                                <th class="text-end">Quantity</th>
+                                <th class="text-end">LTP</th>
+                                <th class="text-end">Value</th>
+                                <th class="text-end">Avg Price</th>
+                                <th class="text-end">DP Limit</th>
+                                <th class="text-end">Utilized (Snapshot)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for loan in loans %}
+                                {% for scrip in loan.pledged_scrips.all %}
+                                <tr class="pledge-item" data-loan-id="{{ loan.id }}">
+                                    <td>{{ loan.bank_name }}</td>
+                                    <td><strong>{{ scrip.symbol }}</strong></td>
+                                    <td class="text-end">{{ scrip.quantity }}</td>
+                                    <td class="text-end">Rs. {{ scrip.ltp|floatformat:2 }}</td>
+                                    <td class="text-end">Rs. {{ scrip.current_value|floatformat:0|intcomma }}</td>
+                                    <td class="text-end">{{ scrip.average_price|floatformat:2 }}</td>
+                                    <td class="text-end text-success"><strong>Rs. {{ scrip.current_dp|floatformat:0|intcomma }}</strong></td>
+                                    <td class="text-end text-muted">Rs. {{ scrip.utilized_amount|floatformat:0|intcomma }}</td>
                                 </tr>
                                 {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
+                            {% endfor %}
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>
     </div>
-    {% empty %}
-    <div class="alert alert-info text-center">
-        <i class="fas fa-info-circle fa-3x mb-3"></i>
-        <h5>No Loan Facilities Found</h5>
-        <p>Click "Add Loan Facility" to get started with margin financing tracking.</p>
-    </div>
-    {% endfor %}
-
 </div>
 
-<!-- Modal: Add Loan Facility -->
-<div class="modal fade" id="addLoanModal" tabindex="-1">
+<div class="modal fade" id="addLoanModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
-            <div class="modal-header">
+            <div class="modal-header bg-success text-white">
                 <h5 class="modal-title"><i class="fas fa-university"></i> Add New Loan Facility</h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <form method="post">
                 {% csrf_token %}
                 <div class="modal-body">
-                    {{ loan_form.as_p }}
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" name="add_loan" class="btn btn-primary">
-                        <i class="fas fa-save"></i> Save Loan Facility
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
-
-<!-- Modal: Add Pledged Scrip -->
-<div class="modal fade" id="addPledgeModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title"><i class="fas fa-shield-alt"></i> Pledge Securities</h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-            </div>
-            <form method="post" id="pledgeForm">
-                {% csrf_token %}
-                <div class="modal-body">
-                    <div class="alert alert-info">
-                        <i class="fas fa-info-circle"></i> This will validate against your MeroShare free balance and calculate drawing power automatically.
+                    {% if loan_form.non_field_errors %}
+                    <div class="alert alert-danger">
+                        {{ loan_form.non_field_errors }}
                     </div>
-                    
-                    {{ pledge_form.as_p }}
-                    
-                    <!-- Real-time Info Display -->
-                    <div id="scripInfo" class="mt-3" style="display:none;">
-                        <div class="card bg-light">
-                            <div class="card-body">
-                                <h6>Share Details:</h6>
-                                <div class="row">
-                                    <div class="col-6">
-                                        <strong>Current Balance:</strong> <span id="currentBalance">-</span><br>
-                                        <strong>Free Balance:</strong> <span id="freeBalance" class="text-success">-</span><br>
-                                        <strong>Pledged Balance:</strong> <span id="pledgeBalance">-</span>
-                                    </div>
-                                    <div class="col-6">
-                                        <strong>Latest Price:</strong> Rs. <span id="closingPrice">-</span><br>
-                                        <strong>Price Date:</strong> <span id="businessDate">-</span><br>
-                                        <strong>Estimated DP:</strong> Rs. <span id="estimatedDP" class="text-primary">-</span>
-                                    </div>
-                                </div>
+                    {% endif %}
+
+                    {% for field in loan_form %}
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">{{ field.label }}</label>
+                        {{ field }}
+                        {% if field.help_text %}
+                            <small class="form-text text-muted">{{ field.help_text }}</small>
+                        {% endif %}
+                        {% if field.errors %}
+                            <div class="text-danger small mt-1">
+                                {{ field.errors|striptags }}
                             </div>
-                        </div>
+                        {% endif %}
                     </div>
+                    {% endfor %}
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" name="add_pledge" class="btn btn-success">
-                        <i class="fas fa-lock"></i> Pledge Shares
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
-
-<!-- Modal: Update Interest Rate -->
-<div class="modal fade" id="addRateModal" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title"><i class="fas fa-percent"></i> Update Interest Rate</h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-            </div>
-            <form method="post">
-                {% csrf_token %}
-                <div class="modal-body">
-                    {{ interest_form.as_p }}
-                    
-                    <!-- Auto-calculate Total Rate -->
-                    <div class="alert alert-secondary">
-                        <strong>Effective Rate:</strong> 
-                        <span id="effectiveRate" class="fs-4">0.00%</span>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" name="add_rate" class="btn btn-info">
-                        <i class="fas fa-check"></i> Update Rate
+                    <button type="submit" name="add_loan" class="btn btn-success">
+                        <i class="fas fa-save"></i> Save Facility
                     </button>
                 </div>
             </form>
@@ -365,80 +329,72 @@
 
 {% endblock %}
 
-{% block extra_js %}
+{% block scripts %}
 <script>
-    // Auto-calculate effective rate
-    function updateEffectiveRate() {
-        const baseRate = parseFloat(document.getElementById('id_base_rate').value) || 0;
-        const premium = parseFloat(document.getElementById('id_premium').value) || 0;
-        const total = baseRate + premium;
-        document.getElementById('effectiveRate').innerText = total.toFixed(2) + '%';
+    // --- 1. MODAL CONTROLLERS ---
+
+    // Manually Open Add Loan Modal (More reliable than data-bs-target)
+    function openAddLoanModal() {
+        var myModal = new bootstrap.Modal(document.getElementById('addLoanModal'));
+        myModal.show();
     }
 
-    document.getElementById('id_base_rate')?.addEventListener('input', updateEffectiveRate);
-    document.getElementById('id_premium')?.addEventListener('input', updateEffectiveRate);
-
-    // Set loan_facility for pledge modal
-    function setLoanForPledge(loanId) {
-        document.querySelector('#addPledgeModal select[name="loan_facility"]').value = loanId;
+    // Open Loan Details (Inventory) Modal
+    function showLoanDetails(loanId) {
+        document.getElementById('bankFilter').value = loanId;
+        filterLoanDetails();
+        var myModal = new bootstrap.Modal(document.getElementById('loanDetailsModal'));
+        myModal.show();
     }
 
-    function setLoanForRate(loanId) {
-        document.querySelector('#addRateModal select[name="loan_facility"]').value = loanId;
+    // --- 2. FILTER LOGIC ---
+    function filterLoanDetails() {
+        const bankId = document.getElementById('bankFilter').value;
+        const rows = document.querySelectorAll('.pledge-item');
+        rows.forEach(row => {
+            const rowBankId = row.getAttribute('data-loan-id');
+            row.style.display = (bankId === 'all' || rowBankId === bankId) ? '' : 'none';
+        });
     }
 
-    // Fetch scrip info when demat and symbol are selected
-    const dematSelect = document.getElementById('id_demat_account');
-    const symbolInput = document.getElementById('id_symbol');
-    const qtyInput = document.getElementById('id_quantity');
-    const valPercentInput = document.getElementById('id_val_percent');
-    const avgPriceInput = document.getElementById('id_avg_price');
-
-    function fetchScripInfo() {
-        const dematId = dematSelect?.value;
-        const symbol = symbolInput?.value.toUpperCase();
+    // --- 3. SYNC API ---
+    function syncAllLoans() {
+        const btn = event.target.closest('button');
+        const originalHTML = btn.innerHTML;
         
-        if (dematId && symbol) {
-            fetch(`/accounting/api/get-scrip-info/?demat_id=${dematId}&symbol=${symbol}`)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.found) {
-                        document.getElementById('currentBalance').innerText = data.current_balance;
-                        document.getElementById('freeBalance').innerText = data.free_balance;
-                        document.getElementById('pledgeBalance').innerText = data.pledge_balance;
-                        document.getElementById('closingPrice').innerText = data.closing_price.toFixed(2);
-                        document.getElementById('businessDate').innerText = data.business_date;
-                        document.getElementById('scripInfo').style.display = 'block';
-                        
-                        // Auto-fill closing price
-                        if (avgPriceInput && !avgPriceInput.value) {
-                            avgPriceInput.value = data.closing_price.toFixed(2);
-                        }
-                        
-                        calculateEstimatedDP(data.closing_price);
-                    } else {
-                        alert('No holdings found for this symbol in selected Demat account.');
-                        document.getElementById('scripInfo').style.display = 'none';
-                    }
-                });
-        }
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Syncing...';
+        
+        fetch('{% url "accounting_desk:sync_loan_valuations" %}', {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert(`✓ Sync Complete!\nUpdated ${data.updated} scrips.`);
+                location.reload();
+            } else {
+                alert('Sync failed: ' + (data.error || 'Unknown error'));
+            }
+        })
+        .catch(error => {
+            alert('Error syncing: ' + error);
+        })
+        .finally(() => {
+            btn.disabled = false;
+            btn.innerHTML = originalHTML;
+        });
     }
 
-    function calculateEstimatedDP(closingPrice) {
-        const qty = parseFloat(qtyInput?.value) || 0;
-        const avgPrice = parseFloat(avgPriceInput?.value) || closingPrice;
-        const valPercent = parseFloat(valPercentInput?.value) || 50;
-        
-        const basePrice = Math.min(avgPrice, closingPrice);
-        const dp = basePrice * qty * (valPercent / 100);
-        
-        document.getElementById('estimatedDP').innerText = dp.toFixed(0);
-    }
-
-    symbolInput?.addEventListener('blur', fetchScripInfo);
-    dematSelect?.addEventListener('change', fetchScripInfo);
-    qtyInput?.addEventListener('input', () => calculateEstimatedDP(parseFloat(document.getElementById('closingPrice').innerText)));
-    valPercentInput?.addEventListener('input', () => calculateEstimatedDP(parseFloat(document.getElementById('closingPrice').innerText)));
-    avgPriceInput?.addEventListener('input', () => calculateEstimatedDP(parseFloat(document.getElementById('closingPrice').innerText)));
+    // --- 4. ERROR HANDLING (Auto-Open Modal on Error) ---
+    document.addEventListener("DOMContentLoaded", function() {
+        // If Django backend returned form errors (POST failed), re-open the modal immediately
+        {% if loan_form.errors %}
+            openAddLoanModal();
+        {% endif %}
+    });
 </script>
 {% endblock %}

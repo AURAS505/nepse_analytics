@@ -1,0 +1,150 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load humanize %}
+
+{% block title %}Pledge Entry Sheet{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4 bg-white p-3 rounded shadow-sm">
+        <div>
+            <h3 class="mb-0"><i class="fas fa-file-signature"></i> Pledge Entry Sheet</h3>
+            <small class="text-muted">Transaction Log & Limit Calculation</small>
+        </div>
+        <div class="btn-group">
+            <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#uploadModal">
+                <i class="fas fa-file-upload"></i> Upload CSV
+            </button>
+            <a href="{% url 'accounting_desk:download_pledge_sample' %}" class="btn btn-outline-success">
+                <i class="fas fa-download"></i> Sample
+            </a>
+            <form action="{% url 'accounting_desk:delete_all_pledges' %}" method="POST" onsubmit="return confirm('⚠ ARE YOU SURE? This will delete ALL transaction history and reset inventory!');" class="d-inline">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-danger ms-2">
+                    <i class="fas fa-trash-alt"></i> Delete All
+                </button>
+            </form>
+        </div>
+        <div>
+            <a href="{% url 'accounting_desk:manage_margins' %}" class="btn btn-warning me-2">
+                <i class="fas fa-percentage"></i> Margins
+            </a>
+            <a href="{% url 'accounting_desk:bank_loan_report' %}" class="btn btn-outline-secondary">
+                <i class="fas fa-arrow-left"></i> Dashboard
+            </a>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-3">
+            <div class="card p-3 shadow-sm">
+                <h5 class="mb-3 text-primary">New Entry</h5>
+                <form method="post">
+                    {% csrf_token %}
+                    <div class="mb-2">{{ form.date.label_tag }} {{ form.date }}</div>
+                    <div class="mb-2">{{ form.loan_facility.label_tag }} {{ form.loan_facility }}</div>
+                    <div class="mb-2">{{ form.demat_account.label_tag }} {{ form.demat_account }}</div>
+                    <div class="row">
+                        <div class="col-6 mb-2">{{ form.symbol.label_tag }} {{ form.symbol }}</div>
+                        <div class="col-6 mb-2">{{ form.action.label_tag }} {{ form.action }}</div>
+                    </div>
+                    <div class="row">
+                        <div class="col-6 mb-2">{{ form.kitta.label_tag }} {{ form.kitta }}</div>
+                        <div class="col-6 mb-2">
+                            {{ form.margin.label_tag }} {{ form.margin }}
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-6 mb-2">{{ form.average_closing_price.label_tag }} {{ form.average_closing_price }}</div>
+                        <div class="col-6 mb-2">{{ form.closing_price.label_tag }} {{ form.closing_price }}</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="fw-bold text-success">Utilized Loan (Rs.)</label>
+                        {{ form.utilized_loan }}
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">Save Entry</button>
+                </form>
+            </div>
+            
+            <div class="card bg-primary text-white mt-3 p-3 text-center">
+                <small class="text-uppercase">Total Utilized Limit</small>
+                <h3 class="mt-2">Rs. {{ total_utilization|floatformat:0|intcomma }}</h3>
+            </div>
+        </div>
+
+        <div class="col-md-9">
+            <div class="card shadow-sm p-0 overflow-hidden">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0 table-striped align-middle table-sm">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>Date</th>
+                                <th>Bank</th>
+                                <th>Script</th>
+                                <th>Action</th>
+                                <th class="text-end">Kitta</th>
+                                <th class="text-end">Low</th>
+                                <th class="text-end">Margin</th>
+                                <th class="text-end">DP Limit</th>
+                                <th class="text-end">Loan Used</th>
+                                <th class="text-center">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for entry in entries %}
+                            <tr>
+                                <td>{{ entry.date|date:"Y-m-d" }}</td>
+                                <td>{{ entry.loan_facility.bank_name }}</td>
+                                <td><strong>{{ entry.symbol }}</strong></td>
+                                <td>
+                                    <span class="badge {% if entry.action == 'PLEDGE' %}bg-success{% elif entry.action == 'UNPLEDGE' %}bg-danger{% else %}bg-info{% endif %}">
+                                        {{ entry.get_action_display }}
+                                    </span>
+                                </td>
+                                <td class="text-end">{{ entry.kitta }}</td>
+                                <td class="text-end">{{ entry.low_price|floatformat:0 }}</td>
+                                <td class="text-end">{{ entry.margin }}%</td>
+                                <td class="text-end text-primary fw-bold">{{ entry.drawing_power|floatformat:0|intcomma }}</td>
+                                <td class="text-end">{{ entry.utilized_loan|floatformat:0|intcomma }}</td>
+                                <td class="text-center">
+                                    <div class="btn-group btn-group-sm">
+                                        <a href="{% url 'accounting_desk:edit_pledge_entry' entry.pk %}" class="btn btn-outline-primary">
+                                            <i class="fas fa-edit"></i>
+                                        </a>
+                                        <a href="{% url 'accounting_desk:delete_pledge_entry' entry.pk %}" 
+                                           class="btn btn-outline-danger" 
+                                           onclick="return confirm('Delete this entry? This will reverse inventory changes.');">
+                                            <i class="fas fa-trash"></i>
+                                        </a>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="uploadModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Upload CSV</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form action="{% url 'accounting_desk:upload_pledge_entries' %}" method="POST" enctype="multipart/form-data">
+                {% csrf_token %}
+                <div class="modal-body">
+                    <input type="file" name="file" class="form-control" required accept=".csv">
+                </div>
+                <div class="modal-footer">
+                    <button type="submit" class="btn btn-success">Upload</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
