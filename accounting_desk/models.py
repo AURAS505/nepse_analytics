@@ -1,193 +1,209 @@
 from django.db import models
 from django.utils import timezone
-from datetime import date
 from decimal import Decimal
-from django.core.exceptions import ValidationError
-from django.db.models import Sum, F
+import uuid
 
-# Adjust these imports if your app name is different for portfolio
-from my_portfolio.models import DematAccount, MeroShareHolding
-from nepse_data.models import StockPrices
+# --- External Imports ---
+from listed_companies.models import Companies
+from my_portfolio.models import DematAccount
 
-# --- 1. CORE ACCOUNTING MODELS ---
-class AccountCategory(models.TextChoices):
-    ASSET = 'ASSET', 'Asset (Cash/Bank)'
-    LIABILITY = 'LIABILITY', 'Liability (Loans/Payables)'
-    EQUITY = 'EQUITY', 'Equity'
-    INCOME = 'INCOME', 'Income (Dividends/Profit)'
-    EXPENSE = 'EXPENSE', 'Expense (Fees/Charges)'
+# ==============================================================================
+# 1. BANK FACILITY ENTRY SHEET
+# ==============================================================================
+class LoanFacility(models.Model):
+    """
+    Entry Sheet 1: Bank Facility Details
+    Stores static details about the loan agreement.
+    """
+    bank_name = models.CharField(max_length=100, verbose_name="Bank Name")
+    account_number = models.CharField(max_length=50, blank=True, verbose_name="Loan A/C No")
+    sanctioned_limit = models.DecimalField(max_digits=15, decimal_places=2, default=0, verbose_name="Sanctioned Limit")
+    
+    start_date = models.DateField(default=timezone.now, verbose_name="Sanction Date")
+    expiry_date = models.DateField(null=True, blank=True, verbose_name="Expiry Date")
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
-class AccountHead(models.Model):
-    name = models.CharField(max_length=100)
-    category = models.CharField(max_length=20, choices=AccountCategory.choices)
-    broker_code = models.CharField(max_length=10, blank=True, null=True) 
+    class Meta:
+        verbose_name = "1. Bank Facility Entry"
+        verbose_name_plural = "1. Bank Facility Entries"
+        ordering = ['bank_name']
 
     def __str__(self):
-        return f"{self.name} ({self.get_category_display()})"
+        return f"{self.bank_name} ({self.account_number})"
 
-class LedgerEntry(models.Model):
-    ENTRY_TYPES = [('DR', 'Debit'), ('CR', 'Credit')]
-    date = models.DateField(default=timezone.now)
-    account = models.ForeignKey(AccountHead, on_delete=models.CASCADE, related_name='entries')
-    description = models.CharField(max_length=255)
-    ref_id = models.CharField(max_length=50, blank=True)
-    entry_type = models.CharField(max_length=2, choices=ENTRY_TYPES)
-    amount = models.DecimalField(max_digits=15, decimal_places=2)
-    is_settled = models.BooleanField(default=True)
-    due_date = models.DateField(null=True, blank=True)
+
+# ==============================================================================
+# 2. INTEREST RATE ENTRY SHEET
+# ==============================================================================
+class LoanInterestHistory(models.Model):
+    """
+    Entry Sheet 2: Interest Rates
+    Tracks historical changes in rates (Base Rate + Premium).
+    """
+    loan_facility = models.ForeignKey(LoanFacility, on_delete=models.CASCADE, related_name='interest_entries', verbose_name="Bank")
+    effective_date = models.DateField(default=timezone.now, verbose_name="Effective Date")
+    
+    base_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0, verbose_name="Base Rate %")
+    premium = models.DecimalField(max_digits=5, decimal_places=2, default=0, verbose_name="Premium %")
+    
+    remarks = models.CharField(max_length=200, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        ordering = ['-date', '-created_at']
-        verbose_name_plural = "Ledger Entries"
-
-
-# --- 2. BANK LOAN MODELS ---
-
-class LoanFacility(models.Model):
-    bank_name = models.CharField(max_length=100)
-    account_number = models.CharField(max_length=50, blank=True)
-    sanctioned_limit = models.DecimalField(max_digits=15, decimal_places=2)
-    start_date = models.DateField(default=timezone.now, help_text="Loan Sanction Date")
-    expiry_date = models.DateField(null=True, blank=True, help_text="Renewal/Expiry Date")
-    
-    # This field is auto-calculated from PledgeEntry
-    current_used_amount = models.DecimalField(max_digits=15, decimal_places=2, default=0, editable=False)
-
-    class Meta:
-        verbose_name_plural = "Loan Facilities"
-
-    def __str__(self):
-        return f"{self.bank_name} - {self.account_number}"
-
-    def recalculate_usage(self):
-        """Auto-calculate usage from Entry Sheet"""
-        entries = self.pledge_entries.all()
-        total = Decimal(0)
-        for entry in entries:
-            if entry.action in ['BALANCE', 'PLEDGE']:
-                total += entry.utilized_loan
-            elif entry.action == 'UNPLEDGE':
-                total -= entry.utilized_loan
-        
-        self.current_used_amount = max(total, Decimal(0))
-        self.save()
-
-    @property
-    def get_active_rate(self):
-        today = date.today()
-        active = self.interest_history.filter(effective_date__lte=today, end_date__gte=today).first()
-        if active: return active.rate
-        ongoing = self.interest_history.filter(effective_date__lte=today, end_date__isnull=True).first()
-        if ongoing: return ongoing.rate
-        latest = self.interest_history.first()
-        return latest.rate if latest else 0.0
-
-
-class LoanInterestHistory(models.Model):
-    loan_facility = models.ForeignKey(LoanFacility, on_delete=models.CASCADE, related_name='interest_history')
-    base_rate = models.FloatField(help_text="Bank's Base Rate %", default=0.0)
-    premium = models.FloatField(help_text="Agreed Premium %", default=0.0)
-    rate = models.FloatField(help_text="Total Effective Rate %", editable=False)
-    effective_date = models.DateField(verbose_name="From Date")
-    end_date = models.DateField(verbose_name="To Date", null=True, blank=True)
-    remarks = models.CharField(max_length=200, blank=True)
-
-    class Meta:
+        verbose_name = "2. Interest Rate Entry"
+        verbose_name_plural = "2. Interest Rate Entries"
         ordering = ['-effective_date']
 
-    def save(self, *args, **kwargs):
-        self.rate = float(self.base_rate) + float(self.premium)
-        super().save(*args, **kwargs)
-
-
-# --- 3. MARGIN MANAGEMENT (NEW) ---
-
-class StockMargin(models.Model):
-    date = models.DateField(default=timezone.now)
-    loan_facility = models.ForeignKey(LoanFacility, on_delete=models.CASCADE, verbose_name="Pledged Institution")
-    script = models.CharField(max_length=20, verbose_name="Script")
-    margin = models.FloatField(help_text="Margin % (e.g., 50)")
-    remarks = models.CharField(max_length=200, blank=True)
-
-    class Meta:
-        ordering = ['-date']
-        unique_together = ('loan_facility', 'script', 'date')
-
-    def save(self, *args, **kwargs):
-        self.script = self.script.upper()
-        super().save(*args, **kwargs)
+    @property
+    def total_rate(self):
+        return self.base_rate + self.premium
 
     def __str__(self):
-        return f"{self.script} - {self.loan_facility.bank_name} ({self.margin}%)"
+        return f"{self.loan_facility} - {self.total_rate}%"
 
 
-# --- 4. PLEDGE ENTRY SHEET & INVENTORY ---
+# ==============================================================================
+# 3. MARGIN ENTRY SHEET
+# ==============================================================================
+class MarginRule(models.Model):
+    """
+    Entry Sheet 3: Margin Rules
+    Defines the lending margin (e.g., 50%) for a specific script at a specific bank.
+    """
+    loan_facility = models.ForeignKey(LoanFacility, on_delete=models.CASCADE, related_name='margin_entries', verbose_name="Bank")
+    symbol = models.ForeignKey(Companies, on_delete=models.CASCADE, to_field='script_ticker', verbose_name="Script")
+    
+    margin_percent = models.DecimalField(max_digits=5, decimal_places=2, default=50.00, verbose_name="Margin %")
+    remarks = models.CharField(max_length=200, blank=True)
+    
+    updated_at = models.DateTimeField(auto_now=True)
 
-class PledgeEntry(models.Model):
+    class Meta:
+        verbose_name = "3. Margin Entry"
+        verbose_name_plural = "3. Margin Entries"
+        unique_together = ('loan_facility', 'symbol')
+        ordering = ['symbol']
+
+    def __str__(self):
+        return f"{self.symbol} @ {self.loan_facility}: {self.margin_percent}%"
+
+
+# ==============================================================================
+# 4. PLEDGE ENTRY SHEET (Main Transaction Log)
+# ==============================================================================
+class PledgeEntrySheet(models.Model):
+    """
+    Entry Sheet 4: The Master Transaction Log.
+    User enters data, system auto-calculates Drawing Power (DP).
+    """
+    
     ACTION_CHOICES = [
-        ('BALANCE', 'Balance b/d'),
-        ('PLEDGE', 'Pledge (Add)'),
-        ('UNPLEDGE', 'Unpledged (Release)'),
+        ('BALANCE_BD', 'Balance b/d (Opening)'),
+        ('PLEDGE', 'Pledge (Deposit)'),
+        ('UNPLEDGE', 'Unpledge (Release)'),
+        ('VALUATION', 'Valuation Update'), # Updates price without changing Kitta
     ]
 
-    date = models.DateField(default=timezone.now)
-    loan_facility = models.ForeignKey(LoanFacility, on_delete=models.CASCADE, related_name='pledge_entries', verbose_name="Pledged Institution")
-    demat_account = models.ForeignKey(DematAccount, on_delete=models.CASCADE)
-    symbol = models.CharField(max_length=20, verbose_name="Script")
+    # --- A. User Inputs (Typed on Sheet) ---
+    unique_id = models.CharField(max_length=50, unique=True, blank=True, verbose_name="Unique ID", help_text="Leave blank to auto-generate")
+    date = models.DateField(default=timezone.now, verbose_name="Date")
+    loan_facility = models.ForeignKey(LoanFacility, on_delete=models.CASCADE, related_name='pledge_entries', verbose_name="Bank")
+    demat_account = models.ForeignKey(DematAccount, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="DP / Demat")
+    symbol = models.ForeignKey(Companies, on_delete=models.CASCADE, to_field='script_ticker', verbose_name="Script")
+    action = models.CharField(max_length=20, choices=ACTION_CHOICES, verbose_name="Action")
     
-    action = models.CharField(max_length=10, choices=ACTION_CHOICES)
+    kitta = models.IntegerField(default=0, verbose_name="Kitta", help_text="Qty for this transaction")
     
-    margin = models.FloatField(default=50, verbose_name="Margin %")
-    kitta = models.PositiveIntegerField(verbose_name="Kitta (Qty)")
-    
-    average_closing_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    closing_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    
-    utilized_loan = models.DecimalField(max_digits=15, decimal_places=2, default=0, help_text="Amount Utilized or Repaid")
+    tx_utilized = models.DecimalField(max_digits=15, decimal_places=2, default=0, verbose_name="Utilized Amt", help_text="Loan amount Taken or Repaid")
 
+    # --- B. Rendered Data (Fetched from System) ---
+    # These are saved so historical records don't change if today's price changes
+    tx_180_avg = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name="180 Days Avg")
+    tx_closing_price = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name="Closing Price (CP)")
+    tx_margin = models.DecimalField(max_digits=5, decimal_places=2, default=0, verbose_name="Margin %")
+
+    # --- C. System Calculated (Auto-Filled on Save) ---
+    tx_min_price = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name="Min Price") # Lower of 180 or CP
+    tx_drawing_power = models.DecimalField(max_digits=15, decimal_places=2, default=0, verbose_name="Drawing Amt") # Calculated DP
+    
+    # --- D. Hidden Ledger State (Running Balance) ---
+    # Stores the balance AFTER this transaction
+    cl_kitta = models.IntegerField(default=0, editable=False)
+    cl_drawing_power = models.DecimalField(max_digits=15, decimal_places=2, default=0, editable=False)
+    cl_utilized = models.DecimalField(max_digits=15, decimal_places=2, default=0, editable=False)
+
+    remarks = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
+        verbose_name = "4. Pledge Entry Sheet"
+        verbose_name_plural = "4. Pledge Entry Sheets"
         ordering = ['-date', '-created_at']
-        verbose_name = "Entry Sheet Row"
-
-    @property
-    def low_price(self):
-        """Low (ACP or CP)"""
-        return min(Decimal(self.average_closing_price), Decimal(self.closing_price))
-
-    @property
-    def drawing_power(self):
-        """(Low Price * Kitta * Margin) / 100"""
-        return (self.low_price * Decimal(self.kitta) * Decimal(self.margin)) / 100
 
     def save(self, *args, **kwargs):
+        # 1. Auto-Generate Unique ID if missing
+        if not self.unique_id:
+            self.unique_id = f"PE-{self.date.strftime('%Y%m%d')}-{str(uuid.uuid4())[:6].upper()}"
+
+        # 2. Calculate Min Price (Logic: Min of 180 Avg and CP)
+        # Avoid zero division or errors if data is missing
+        p1 = self.tx_180_avg if self.tx_180_avg else Decimal(0)
+        p2 = self.tx_closing_price if self.tx_closing_price else Decimal(0)
+        
+        if p1 > 0 and p2 > 0:
+            self.tx_min_price = min(p1, p2)
+        else:
+            self.tx_min_price = max(p1, p2) # If one is missing, take the other
+
+        # 3. Calculate Drawing Amount (Transaction Level)
+        # Formula: Kitta * MinPrice * Margin%
+        if self.kitta > 0 and self.tx_min_price > 0:
+            valuation = Decimal(self.kitta) * self.tx_min_price
+            self.tx_drawing_power = valuation * (self.tx_margin / Decimal(100))
+        else:
+            self.tx_drawing_power = Decimal(0)
+
+        # 4. Calculate Running Balances (Closing State)
+        # We need the PREVIOUS closing balance to calculate THIS closing balance.
+        # Note: This simple logic assumes entries are added sequentially. 
+        prev = self.get_previous_entry()
+        op_kitta = prev.cl_kitta if prev else 0
+        op_dp = prev.cl_drawing_power if prev else Decimal(0)
+        op_util = prev.cl_utilized if prev else Decimal(0)
+
+        if self.action == 'BALANCE_BD':
+            self.cl_kitta = self.kitta
+            self.cl_drawing_power = self.tx_drawing_power
+            self.cl_utilized = self.tx_utilized
+
+        elif self.action == 'PLEDGE':
+            self.cl_kitta = op_kitta + self.kitta
+            self.cl_drawing_power = op_dp + self.tx_drawing_power
+            self.cl_utilized = op_util + self.tx_utilized
+
+        elif self.action == 'UNPLEDGE':
+            self.cl_kitta = max(0, op_kitta - self.kitta)
+            self.cl_drawing_power = max(Decimal(0), op_dp - self.tx_drawing_power)
+            self.cl_utilized = max(Decimal(0), op_util - self.tx_utilized)
+
+        elif self.action == 'VALUATION':
+            self.cl_kitta = op_kitta
+            # For valuation, we recalculate DP for the WHOLE inventory based on NEW prices
+            total_valuation = Decimal(self.cl_kitta) * self.tx_min_price
+            self.cl_drawing_power = total_valuation * (self.tx_margin / Decimal(100))
+            self.cl_utilized = op_util # Usage doesn't usually change on valuation
+            
+            # For display purposes, tx_drawing_power in valuation shows the Difference (Gain/Loss)
+            self.tx_drawing_power = self.cl_drawing_power - op_dp
+
         super().save(*args, **kwargs)
-        # Trigger usage update on loan
-        self.loan_facility.recalculate_usage()
 
-
-class PledgedScrip(models.Model):
-    """Inventory Snapshot"""
-    loan_facility = models.ForeignKey(LoanFacility, on_delete=models.CASCADE, related_name='pledged_scrips')
-    demat_account = models.ForeignKey(DematAccount, on_delete=models.CASCADE, null=True, blank=True)
-    symbol = models.CharField(max_length=20) 
-    quantity = models.PositiveIntegerField(default=0)
-    
-    # Valuation snapshot
-    average_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    closing_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    valuation_percent = models.FloatField(default=50)
-    allowable_drawing_power = models.DecimalField(max_digits=15, decimal_places=2, default=0)
-    
-    # Tracked from Entries
-    utilized_amount = models.DecimalField(max_digits=15, decimal_places=2, default=0)
-
-    def save(self, *args, **kwargs):
-        base_price = min(Decimal(self.average_price), Decimal(self.closing_price))
-        self.allowable_drawing_power = base_price * Decimal(self.quantity) * (Decimal(self.valuation_percent) / 100)
-        super().save(*args, **kwargs)
-
-    def __str__(self):
-        return f"{self.symbol} ({self.quantity})"
+    def get_previous_entry(self):
+        """Finds the most recent entry before this one for the same Bank & Script."""
+        return PledgeEntrySheet.objects.filter(
+            loan_facility=self.loan_facility,
+            symbol=self.symbol,
+            created_at__lt=self.created_at if self.pk else timezone.now()
+        ).order_by('-date', '-created_at').first()

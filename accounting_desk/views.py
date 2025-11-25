@@ -1,505 +1,247 @@
-import csv
 from django.shortcuts import render, redirect, get_object_or_404
+from django.contrib.auth.decorators import login_required
 from django.contrib import messages
+from django.db.models import Sum
 from django.http import JsonResponse, HttpResponse
-from django.db.models import Sum, F
-from django.views.decorators.http import require_POST
 from django.utils import timezone
-from datetime import datetime
 from decimal import Decimal
+from datetime import datetime, timedelta
 
-from .models import LoanFacility, PledgedScrip, PledgeEntry, StockMargin, MeroShareHolding, DematAccount
-from .forms import LoanFacilityForm, PledgeEntryForm, StockMarginForm
-from nepse_data.models import StockPrices
+# --- UPDATED IMPORTS (Using new model/form names) ---
+from .models import (
+    LoanFacility, 
+    LoanInterestHistory, 
+    MarginRule, 
+    PledgeEntrySheet  # <--- Renamed from PledgeLedger
+)
+from .forms import (
+    LoanFacilityForm, 
+    LoanInterestForm, 
+    MarginRuleForm, 
+    PledgeEntrySheetForm # <--- Renamed from PledgeLedgerForm
+)
 
+# Other Apps
+from nepse_data.models import StockPrices, Indices
+from listed_companies.models import Companies
 
-
-# ==========================================
-# HELPER FUNCTIONS (To avoid code duplication)
-# ==========================================
-
-def _update_inventory(entry):
-    """Applies a PledgeEntry's effect to Inventory & MeroShare"""
-    # 1. Update Inventory (PledgedScrip)
-    scrip, created = PledgedScrip.objects.get_or_create(
-        loan_facility=entry.loan_facility,
-        demat_account=entry.demat_account,
-        symbol=entry.symbol,
-        defaults={'valuation_percent': entry.margin}
-    )
-    
-    # Use Python math
-    if entry.action in ['BALANCE', 'PLEDGE']:
-        scrip.quantity += entry.kitta
-        scrip.utilized_amount += entry.utilized_loan
-    elif entry.action == 'UNPLEDGE':
-        if scrip.quantity >= entry.kitta:
-            scrip.quantity -= entry.kitta
-        else:
-            scrip.quantity = 0
-        scrip.utilized_amount -= entry.utilized_loan
-    
-    scrip.average_price = entry.average_closing_price
-    scrip.closing_price = entry.closing_price
-    scrip.valuation_percent = entry.margin
-    scrip.save()
-    
-    # 2. Update MeroShare
-    holding = MeroShareHolding.objects.filter(demat_account=entry.demat_account, symbol__script_ticker=entry.symbol).order_by('-snapshot_date').first()
-    if holding:
-        if entry.action in ['BALANCE', 'PLEDGE']:
-            holding.free_balance = F('free_balance') - entry.kitta
-            holding.pledge_balance = F('pledge_balance') + entry.kitta
-        elif entry.action == 'UNPLEDGE':
-            holding.free_balance = F('free_balance') + entry.kitta
-            holding.pledge_balance = F('pledge_balance') - entry.kitta
-        holding.save()
-
-def _revert_inventory(entry):
-    """Reverses a PledgeEntry's effect (Used for Edit/Delete)"""
-    # 1. Reverse Inventory
-    scrip = PledgedScrip.objects.filter(
-        loan_facility=entry.loan_facility,
-        demat_account=entry.demat_account,
-        symbol=entry.symbol
-    ).first()
-
-    if scrip:
-        if entry.action in ['BALANCE', 'PLEDGE']:
-            # Originally added, so subtract
-            scrip.quantity = max(0, scrip.quantity - entry.kitta)
-            scrip.utilized_amount -= entry.utilized_loan
-        elif entry.action == 'UNPLEDGE':
-            # Originally subtracted, so add back
-            scrip.quantity += entry.kitta
-            scrip.utilized_amount += entry.utilized_loan
-        scrip.save()
-
-    # 2. Reverse MeroShare
-    holding = MeroShareHolding.objects.filter(demat_account=entry.demat_account, symbol__script_ticker=entry.symbol).order_by('-snapshot_date').first()
-    if holding:
-        if entry.action in ['BALANCE', 'PLEDGE']:
-            # Was deducted from free, so add back
-            holding.free_balance = F('free_balance') + entry.kitta
-            holding.pledge_balance = F('pledge_balance') - entry.kitta
-        elif entry.action == 'UNPLEDGE':
-            # Was added to free, so deduct
-            holding.free_balance = F('free_balance') - entry.kitta
-            holding.pledge_balance = F('pledge_balance') + entry.kitta
-        holding.save()
-
-
-# ==========================================
-# 1. DASHBOARD & CORE UTILS
-# ==========================================
-
+@login_required
 def accounting_dashboard(request):
-    """Main landing page for Accounting Desk"""
-    return render(request, 'accounting_desk/accounting_dashboard.html', {})
-
-def get_scrip_info(request):
-    """API to fetch Price and Margin for a script"""
-    loan_id = request.GET.get('loan_id')
-    symbol = request.GET.get('symbol', '').upper()
-    
-    data = {'found': False, 'closing_price': 0, 'margin': 50} # Default margin
-
-    if symbol:
-        # 1. Fetch Price
-        price_obj = StockPrices.objects.filter(symbol=symbol).order_by('-business_date').first()
-        if price_obj:
-            data['found'] = True
-            data['closing_price'] = float(price_obj.close_price)
-        
-        # 2. Fetch Specific Margin for this Bank+Script
-        if loan_id:
-            margin_obj = StockMargin.objects.filter(
-                loan_facility_id=loan_id, 
-                script=symbol
-            ).order_by('-date').first()
-            
-            if margin_obj:
-                data['margin'] = margin_obj.margin
-                data['margin_source'] = 'Custom'
-            else:
-                data['margin_source'] = 'Default'
-
-    return JsonResponse(data)
-
-
-# ==========================================
-# 2. BANK LOAN REPORT (DASHBOARD)
-# ==========================================
-
-def bank_loan_report(request):
-    loan_form = LoanFacilityForm()
-
-    if request.method == 'POST' and 'add_loan' in request.POST:
-        loan_form = LoanFacilityForm(request.POST)
-        if loan_form.is_valid():
-            loan_form.save()
-            messages.success(request, "New Loan Facility Added")
-            return redirect('accounting_desk:bank_loan_report')
-        else:
-             messages.error(request, "Error adding loan.")
-            
-    loans = LoanFacility.objects.prefetch_related('pledged_scrips').all()
-    
-    grand_totals = {
-        'total_sanctioned': 0,
-        'total_used': 0,
-        'total_drawing_power': 0,
-        'total_collateral_value': 0,
+    """
+    Main Landing Page / Dashboard
+    """
+    context = {
+        'total_loans': LoanFacility.objects.count(),
+        'active_pledges': PledgeEntrySheet.objects.filter(cl_kitta__gt=0).count(),
     }
+    return render(request, 'accounting_desk/accounting_dashboard.html', context)
 
-    processed_loans = []
+
+@login_required
+def bank_loan_report(request):
+    """
+    Entry Sheet 1 & 2 Management (Loans & Rates)
+    Also shows summary of utilization.
+    """
+    # Initialize forms
+    loan_form = LoanFacilityForm(prefix='loan')
+    rate_form = LoanInterestForm(prefix='rate', initial={'effective_date': timezone.now().date()})
+
+    if request.method == 'POST':
+        if 'add_loan' in request.POST:
+            loan_form = LoanFacilityForm(request.POST, prefix='loan')
+            if loan_form.is_valid():
+                loan_form.save()
+                messages.success(request, "New Loan Facility created!")
+                return redirect('accounting_desk:bank_loan_report')
+        
+        elif 'add_rate' in request.POST:
+            rate_form = LoanInterestForm(request.POST, prefix='rate')
+            if rate_form.is_valid():
+                rate_form.save()
+                messages.success(request, "Interest rate updated!")
+                return redirect('accounting_desk:bank_loan_report')
+
+    # Calculate Totals
+    loans = LoanFacility.objects.all()
+    loan_data = []
+    
+    grand_total_sanctioned = Decimal(0)
+    grand_total_dp = Decimal(0)
+    grand_total_used = Decimal(0)
+
     for loan in loans:
-        loan_dp = 0
-        loan_collat = 0
-        for scrip in loan.pledged_scrips.all():
-            # Real-time price fetch
-            price_obj = StockPrices.objects.filter(symbol=scrip.symbol).order_by('-business_date').first()
-            ltp = float(price_obj.close_price) if price_obj else float(scrip.closing_price)
+        # Get latest status for every script in this loan to calculate totals
+        # We find distinct scripts, then find the latest entry for each
+        scripts = loan.pledge_entries.values_list('symbol', flat=True).distinct()
+        current_dp = Decimal(0)
+        current_utilized = Decimal(0)
+        
+        for script in scripts:
+            # Get latest entry for this script + bank
+            last = PledgeEntrySheet.objects.filter(
+                loan_facility=loan, 
+                symbol__script_ticker=script
+            ).order_by('-date', '-created_at').first()
             
-            # Recalculate Scrip DP
-            base = min(float(scrip.average_price), ltp)
-            scrip_dp = base * scrip.quantity * (scrip.valuation_percent / 100)
-            scrip_val = ltp * scrip.quantity
-            
-            loan_dp += scrip_dp
-            loan_collat += scrip_val
-            
-            scrip.ltp = ltp
-            scrip.current_dp = scrip_dp
-            scrip.current_value = scrip_val
+            if last:
+                current_dp += last.cl_drawing_power
+                current_utilized += last.cl_utilized
+        
+        loan_data.append({
+            'obj': loan,
+            'dp': current_dp,
+            'utilized': current_utilized,
+            'headroom': loan.sanctioned_limit - current_utilized,
+            'util_percent': (current_utilized / loan.sanctioned_limit * 100) if loan.sanctioned_limit else 0
+        })
 
-        loan.calculated_dp = loan_dp
-        loan.calculated_collateral = loan_collat
-        
-        used = float(loan.current_used_amount)
-        loan.headroom = loan_dp - used
-        loan.utilization_percent = (used / loan_dp * 100) if loan_dp > 0 else 0
-        
-        processed_loans.append(loan)
-        
-        grand_totals['total_sanctioned'] += float(loan.sanctioned_limit)
-        grand_totals['total_used'] += used
-        grand_totals['total_drawing_power'] += loan_dp
-        grand_totals['total_collateral_value'] += loan_collat
-
-    grand_totals['total_headroom'] = grand_totals['total_drawing_power'] - grand_totals['total_used']
+        grand_total_sanctioned += loan.sanctioned_limit
+        grand_total_dp += current_dp
+        grand_total_used += current_utilized
 
     context = {
-        'loans': processed_loans,
-        'grand_totals': grand_totals,
+        'loan_data': loan_data,
         'loan_form': loan_form,
+        'rate_form': rate_form,
+        'grand_totals': {
+            'sanctioned': grand_total_sanctioned,
+            'dp': grand_total_dp,
+            'used': grand_total_used,
+            'headroom': grand_total_sanctioned - grand_total_used
+        }
     }
     return render(request, 'accounting_desk/bank_loan_report.html', context)
 
-@require_POST
-def update_loan_usage(request):
-    return redirect('accounting_desk:bank_loan_report')
 
-@require_POST
-def sync_loan_valuations(request):
-    count = 0
-    for scrip in PledgedScrip.objects.all():
-        price = StockPrices.objects.filter(symbol=scrip.symbol).order_by('-business_date').first()
-        if price:
-            scrip.closing_price = price.close_price
-            scrip.save()
-            count += 1
-    return JsonResponse({'success': True, 'updated': count})
-
-
-# ==========================================
-# 3. PLEDGE ENTRY SHEET & ACTIONS
-# ==========================================
-
+@login_required
 def pledge_entry_sheet(request):
-    if request.method == 'POST':
-        form = PledgeEntryForm(request.POST)
-        if form.is_valid():
-            entry = form.save(commit=False)
-            entry.symbol = entry.symbol.upper()
-            
-            # Logic: Closing Price
-            if entry.action == 'BALANCE' and form.cleaned_data.get('closing_price'):
-                entry.closing_price = form.cleaned_data['closing_price']
-            else:
-                price_obj = StockPrices.objects.filter(symbol=entry.symbol).order_by('-business_date').first()
-                entry.closing_price = price_obj.close_price if price_obj else 0
-            
-            entry.save() 
-            
-            # Update Inventory
-            scrip, created = PledgedScrip.objects.get_or_create(
-                loan_facility=entry.loan_facility,
-                demat_account=entry.demat_account,
-                symbol=entry.symbol,
-                defaults={'valuation_percent': entry.margin}
-            )
-            
-            # Use Python Math for updates (avoid F() expression error on save)
-            if entry.action in ['BALANCE', 'PLEDGE']:
-                scrip.quantity += entry.kitta
-                scrip.utilized_amount += entry.utilized_loan
-            elif entry.action == 'UNPLEDGE':
-                if scrip.quantity >= entry.kitta:
-                    scrip.quantity -= entry.kitta
-                else:
-                    scrip.quantity = 0
-                scrip.utilized_amount -= entry.utilized_loan
-            
-            scrip.average_price = entry.average_closing_price
-            scrip.closing_price = entry.closing_price
-            scrip.valuation_percent = entry.margin
-            scrip.save()
-            
-            # MeroShare Update
-            holding = MeroShareHolding.objects.filter(demat_account=entry.demat_account, symbol__script_ticker=entry.symbol).order_by('-snapshot_date').first()
-            if holding:
-                if entry.action in ['BALANCE', 'PLEDGE']:
-                    holding.free_balance = F('free_balance') - entry.kitta
-                    holding.pledge_balance = F('pledge_balance') + entry.kitta
-                elif entry.action == 'UNPLEDGE':
-                    holding.free_balance = F('free_balance') + entry.kitta
-                    holding.pledge_balance = F('pledge_balance') - entry.kitta
-                holding.save()
-
-            messages.success(request, "Entry Saved.")
-            return redirect('accounting_desk:pledge_entry_sheet')
-    else:
-        form = PledgeEntryForm()
-
-    entries = PledgeEntry.objects.select_related('loan_facility', 'demat_account').order_by('-date', '-id')
-    total_utilization = LoanFacility.objects.aggregate(Sum('current_used_amount'))['current_used_amount__sum'] or 0
-
-    return render(request, 'accounting_desk/pledge_entry_sheet.html', {
-        'form': form, 'entries': entries, 'total_utilization': total_utilization
-    })
-
-def edit_pledge_entry(request, pk):
     """
-    To edit safely:
-    1. Revert the effect of the OLD entry data.
-    2. Save the NEW entry data.
-    3. Apply the effect of the NEW entry data.
+    Entry Sheet 4: The Main Transaction Sheet
     """
-    entry = get_object_or_404(PledgeEntry, pk=pk)
+    selected_loan_id = request.GET.get('loan_facility')
+    selected_symbol = request.GET.get('symbol')
     
+    entries = []
+    initial_data = {'date': timezone.now().date()}
+    
+    if selected_loan_id:
+        initial_data['loan_facility'] = selected_loan_id
+    if selected_symbol:
+        initial_data['symbol'] = selected_symbol
+
+    # Load existing entries if filters applied
+    if selected_loan_id and selected_symbol:
+        entries = PledgeEntrySheet.objects.filter(
+            loan_facility_id=selected_loan_id,
+            symbol__script_ticker=selected_symbol
+        ).order_by('-date', '-created_at')
+
     if request.method == 'POST':
-        form = PledgeEntryForm(request.POST, instance=entry)
+        form = PledgeEntrySheetForm(request.POST)
         if form.is_valid():
-            # 1. Revert Old Impact (using current DB state before save)
-            # We must fetch the object again or rely on the fact that 'entry' still has old data 
-            # (Django form save(commit=False) updates the instance, so we must reverse BEFORE form processing)
-            original_entry = PledgeEntry.objects.get(pk=pk) # Fetch fresh copy of old data
-            _revert_inventory(original_entry)
-            
-            # 2. Save New Data
-            new_entry = form.save(commit=False)
-            new_entry.symbol = new_entry.symbol.upper()
-            
-            # Recalculate price if needed, or keep existing logic
-            if new_entry.action == 'BALANCE' and form.cleaned_data.get('closing_price'):
-                new_entry.closing_price = form.cleaned_data['closing_price']
-            else:
-                price_obj = StockPrices.objects.filter(symbol=new_entry.symbol).order_by('-business_date').first()
-                new_entry.closing_price = price_obj.close_price if price_obj else 0
-            
-            new_entry.save()
-            
-            # 3. Apply New Impact
-            _update_inventory(new_entry)
-            
-            # 4. Trigger Usage Recalc
-            new_entry.loan_facility.recalculate_usage()
-            if original_entry.loan_facility != new_entry.loan_facility:
-                original_entry.loan_facility.recalculate_usage()
-
-            messages.success(request, "Entry Updated Successfully.")
-            return redirect('accounting_desk:pledge_entry_sheet')
+            # The model .save() method now handles all the complex logic (Opening/Closing balance)
+            entry = form.save()
+            messages.success(request, f"Entry {entry.unique_id} saved successfully!")
+            return redirect(f"{request.path}?loan_facility={entry.loan_facility.id}&symbol={entry.symbol.script_ticker}")
+        else:
+            messages.error(request, f"Error: {form.errors}")
     else:
-        form = PledgeEntryForm(instance=entry)
+        form = PledgeEntrySheetForm(initial=initial_data)
 
-    return render(request, 'accounting_desk/edit_pledge.html', {'form': form, 'entry': entry})
-
-def delete_pledge_entry(request, pk):
-    """Deletes an entry and REVERSES its impact on Inventory"""
-    entry = get_object_or_404(PledgeEntry, pk=pk)
-    
-    # 1. Reverse Impact on Inventory (PledgedScrip)
-    scrip = PledgedScrip.objects.filter(
-        loan_facility=entry.loan_facility,
-        demat_account=entry.demat_account,
-        symbol=entry.symbol
-    ).first()
-
-    if scrip:
-        if entry.action in ['BALANCE', 'PLEDGE']:
-            # Originally added, so we subtract
-            scrip.quantity = max(0, scrip.quantity - entry.kitta)
-            scrip.utilized_amount -= entry.utilized_loan
-        elif entry.action == 'UNPLEDGE':
-            # Originally subtracted, so we add back
-            scrip.quantity += entry.kitta
-            scrip.utilized_amount += entry.utilized_loan
-        scrip.save()
-
-    # 2. Reverse Impact on MeroShare
-    holding = MeroShareHolding.objects.filter(demat_account=entry.demat_account, symbol__script_ticker=entry.symbol).order_by('-snapshot_date').first()
-    if holding:
-        if entry.action in ['BALANCE', 'PLEDGE']:
-            holding.free_balance = F('free_balance') + entry.kitta
-            holding.pledge_balance = F('pledge_balance') - entry.kitta
-        elif entry.action == 'UNPLEDGE':
-            holding.free_balance = F('free_balance') - entry.kitta
-            holding.pledge_balance = F('pledge_balance') + entry.kitta
-        holding.save()
-
-    # 3. Delete Entry & Recalculate Loan Usage
-    loan_facility = entry.loan_facility
-    entry.delete()
-    loan_facility.recalculate_usage()
-    
-    messages.warning(request, "Entry Deleted and Inventory Reversed.")
-    return redirect('accounting_desk:pledge_entry_sheet')
-
-def delete_all_pledges(request):
-    """Wipes all data and resets inventory"""
-    if request.method == 'POST':
-        PledgeEntry.objects.all().delete()
-        PledgedScrip.objects.all().delete()
-        
-        # Reset Loan Usage
-        for loan in LoanFacility.objects.all():
-            loan.current_used_amount = 0
-            loan.save()
-            
-        messages.error(request, "All Pledge Entries & Inventory Deleted!")
-    return redirect('accounting_desk:pledge_entry_sheet')
-
-def download_pledge_sample(request):
-    response = HttpResponse(content_type='text/csv')
-    response['Content-Disposition'] = 'attachment; filename="pledge_sample.csv"'
-    writer = csv.writer(response)
-    writer.writerow(['Date', 'Bank Name', 'Demat Name', 'Script', 'Action (BALANCE/PLEDGE/UNPLEDGE)', 'Kitta', 'Margin', 'Avg Price', 'Utilized Loan'])
-    writer.writerow(['2023-10-01', 'Nabil Bank', 'My Demat 1', 'NICA', 'BALANCE', '100', '50', '450', '50000'])
-    return response
-
-def upload_pledge_entries(request):
-    if request.method == 'POST' and request.FILES.get('file'):
-        csv_file = request.FILES['file']
-        decoded_file = csv_file.read().decode('utf-8').splitlines()
-        reader = csv.DictReader(decoded_file)
-        
-        count = 0
-        try:
-            for row in reader:
-                bank = LoanFacility.objects.filter(bank_name__iexact=row['Bank Name']).first()
-                demat = DematAccount.objects.filter(capital_name__icontains=row['Demat Name']).first()
-                
-                if not bank or not demat:
-                    continue # Skip invalid rows
-
-                PledgeEntry.objects.create(
-                    date=row['Date'],
-                    loan_facility=bank,
-                    demat_account=demat,
-                    symbol=row['Script'].upper(),
-                    action=row['Action (BALANCE/PLEDGE/UNPLEDGE)'],
-                    kitta=int(row['Kitta']),
-                    margin=float(row['Margin']),
-                    average_closing_price=float(row['Avg Price']),
-                    utilized_loan=float(row['Utilized Loan'])
-                )
-                count += 1
-            
-            # Simple sync after bulk upload (better to optimize later)
-            for loan in LoanFacility.objects.all():
-                loan.recalculate_usage()
-
-            messages.success(request, f"Uploaded {count} entries.")
-        except Exception as e:
-            messages.error(request, f"Error in CSV: {str(e)}")
-            
-    return redirect('accounting_desk:pledge_entry_sheet')
+    context = {
+        'form': form,
+        'ledger_entries': entries,
+        'loans': LoanFacility.objects.all(),
+        'scripts': Companies.objects.all().order_by('script_ticker'),
+        'selected_loan_id': int(selected_loan_id) if selected_loan_id else None,
+        'selected_symbol': selected_symbol,
+    }
+    return render(request, 'accounting_desk/pledge_entry_sheet.html', context)
 
 
-# ==========================================
-# 4. MARGIN MANAGEMENT & ACTIONS
-# ==========================================
-
+@login_required
 def manage_margins(request):
+    """
+    Entry Sheet 3: Margin Rules
+    """
+    rules = MarginRule.objects.all().select_related('loan_facility')
     if request.method == 'POST':
-        form = StockMarginForm(request.POST)
+        form = MarginRuleForm(request.POST)
         if form.is_valid():
             form.save()
-            messages.success(request, "Margin saved.")
+            messages.success(request, "Margin Rule Added")
             return redirect('accounting_desk:manage_margins')
     else:
-        form = StockMarginForm()
+        form = MarginRuleForm()
+    return render(request, 'accounting_desk/margin_management.html', {'rules': rules, 'form': form})
+
+
+# --- API ---
+@login_required
+def get_scrip_info(request):
+    """
+    Returns 180 Avg, CP, and Margin % for the JS frontend
+    """
+    symbol = request.GET.get('symbol')
+    date_str = request.GET.get('date')
+    loan_id = request.GET.get('loan_facility')
     
-    margins = StockMargin.objects.select_related('loan_facility').order_by('-date')
-    return render(request, 'accounting_desk/margin_management.html', {'form': form, 'margins': margins})
-
-
-def edit_margin(request, pk):
-    margin = get_object_or_404(StockMargin, pk=pk)
-    if request.method == 'POST':
-        form = StockMarginForm(request.POST, instance=margin)
-        if form.is_valid():
-            form.save()
-            messages.success(request, "Margin Updated.")
-            return redirect('accounting_desk:manage_margins')
-    else:
-        form = StockMarginForm(instance=margin)
+    if not symbol or not date_str: 
+        return JsonResponse({'error': 'Missing params'}, status=400)
     
-    return render(request, 'accounting_desk/edit_margin.html', {'form': form, 'margin': margin})
-
-def delete_margin(request, pk):
-    margin = get_object_or_404(StockMargin, pk=pk)
-    margin.delete()
-    messages.warning(request, "Margin Deleted.")
-    return redirect('accounting_desk:manage_margins')
-
-def delete_all_margins(request):
-    if request.method == 'POST':
-        StockMargin.objects.all().delete()
-        messages.error(request, "All Margins Deleted!")
-    return redirect('accounting_desk:manage_margins')
-
-def download_margin_sample(request):
-    response = HttpResponse(content_type='text/csv')
-    response['Content-Disposition'] = 'attachment; filename="margin_sample.csv"'
-    writer = csv.writer(response)
-    writer.writerow(['Date', 'Bank Name', 'Script', 'Margin', 'Remarks'])
-    writer.writerow(['2023-10-01', 'Nabil Bank', 'NICA', '50', 'Quarterly Review'])
-    return response
-
-def upload_margins(request):
-    if request.method == 'POST' and request.FILES.get('file'):
-        csv_file = request.FILES['file']
-        decoded_file = csv_file.read().decode('utf-8').splitlines()
-        reader = csv.DictReader(decoded_file)
+    try:
+        target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
         
-        count = 0
-        try:
-            for row in reader:
-                bank = LoanFacility.objects.filter(bank_name__iexact=row['Bank Name']).first()
-                if bank:
-                    StockMargin.objects.create(
-                        date=row['Date'],
-                        loan_facility=bank,
-                        script=row['Script'].upper(),
-                        margin=float(row['Margin']),
-                        remarks=row.get('Remarks', '')
-                    )
-                    count += 1
-            messages.success(request, f"Uploaded {count} margins.")
-        except Exception as e:
-            messages.error(request, f"Error: {str(e)}")
-            
+        # 1. Get Closing Price
+        price_obj = StockPrices.objects.filter(symbol=symbol, business_date__lte=target_date).order_by('-business_date').first()
+        closing_price = float(price_obj.close_price) if price_obj else 0.0
+        
+        # 2. Get 180 Day Avg
+        start_date = target_date - timedelta(days=180)
+        # Note: Ideally you'd query specific trading days, but strictly between dates works for approximation
+        prices = StockPrices.objects.filter(symbol=symbol, business_date__gte=start_date, business_date__lte=target_date).values_list('close_price', flat=True)
+        avg_price = float(sum(prices) / len(prices)) if prices else 0.0
+        
+        # 3. Get Margin
+        margin = 50.00
+        if loan_id:
+            rule = MarginRule.objects.filter(loan_facility_id=loan_id, symbol__script_ticker=symbol).first()
+            if rule: 
+                margin = float(rule.margin_percent)
+
+        return JsonResponse({
+            'closing_price': closing_price, 
+            'avg_price': avg_price, 
+            'margin': margin
+        })
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+# --- HELPERS / DELETION ---
+@login_required
+def delete_pledge_entry(request, pk): 
+    entry = get_object_or_404(PledgeEntrySheet, pk=pk)
+    loan_id = entry.loan_facility.id
+    symbol = entry.symbol.script_ticker
+    entry.delete()
+    messages.warning(request, "Entry deleted. Note: Future running balances may need re-saving.")
+    return redirect(f"/accounting/loans/entry-sheet/?loan_facility={loan_id}&symbol={symbol}")
+
+@login_required
+def delete_margin(request, pk):
+    MarginRule.objects.filter(pk=pk).delete()
     return redirect('accounting_desk:manage_margins')
 
+# Placeholders for URL patterns not fully implemented yet
+def edit_pledge_entry(request, pk): return redirect('accounting_desk:pledge_entry_sheet')
+def delete_all_pledges(request): return redirect('accounting_desk:pledge_entry_sheet')
+def upload_pledge_entries(request): return redirect('accounting_desk:pledge_entry_sheet')
+def download_pledge_sample(request): return HttpResponse("Sample")
+def delete_all_margins(request): return redirect('accounting_desk:manage_margins')
+def upload_margins(request): return redirect('accounting_desk:manage_margins')
+def download_margin_sample(request): return HttpResponse("Sample")
+def sync_loan_valuations(request): return JsonResponse({'status': 'ok'})
+def update_loan_usage(request): return JsonResponse({'status': 'ok'})
+def edit_margin(request, pk): return redirect('accounting_desk:manage_margins')

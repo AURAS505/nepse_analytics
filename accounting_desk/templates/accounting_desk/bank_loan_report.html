@@ -6,283 +6,150 @@
 
 {% block styles %}
 <style>
-    :root {
-        --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        --success-gradient: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
-        --warning-gradient: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-        --info-gradient: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-    }
+    .card-loan { transition: transform 0.2s, box-shadow 0.2s; border: none; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); background: #fff; }
+    .card-loan:hover { transform: translateY(-5px); box-shadow: 0 8px 15px rgba(0,0,0,0.1); }
+    .stat-label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; color: #6c757d; font-weight: 600; margin-bottom: 2px; }
+    .stat-value { font-size: 1.25rem; font-weight: 700; color: #212529; }
+    .progress-thin { height: 6px; border-radius: 3px; background-color: #e9ecef; margin-top: 5px; }
+    .summary-card-icon { opacity: 0.2; position: absolute; right: 15px; bottom: 15px; font-size: 2.5rem; }
     
-    .summary-card {
-        background: white;
-        border-radius: 15px;
-        padding: 25px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        transition: all 0.3s ease;
-    }
-    
-    .summary-card:hover {
-        box-shadow: 0 4px 16px rgba(0,0,0,0.15);
-        transform: translateY(-2px);
-    }
-    
-    .bank-summary-row {
-        background: #f8f9fa;
-        padding: 15px;
-        margin-bottom: 10px;
-        border-radius: 8px;
-        cursor: pointer;
-        transition: all 0.2s;
-        border-left: 4px solid #007bff;
-    }
-    
-    .bank-summary-row:hover {
-        background: #e9ecef;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    }
-    
-    .utilization-bar {
-        height: 8px;
-        background: #e9ecef;
-        border-radius: 10px;
-        overflow: hidden;
-        margin-top: 8px;
-    }
-    
-    .utilization-fill {
-        height: 100%;
-        transition: width 0.3s ease;
-    }
-    
-    .status-badge {
-        padding: 6px 12px;
-        border-radius: 20px;
-        font-size: 0.8rem;
-        font-weight: 600;
-    }
-    
-    .modal-header {
-        background: var(--primary-gradient);
-        color: white;
-        border-radius: 8px 8px 0 0;
-    }
-    
-    .action-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        background: white;
-        padding: 15px;
-        border-radius: 12px;
-        box-shadow: 0 2px 6px rgba(0,0,0,0.05);
-        margin-bottom: 20px;
-    }
-
-    .tool-group {
-        display: flex;
-        gap: 8px;
-    }
-    
-    .btn-gradient {
-        background: var(--primary-gradient);
-        color: white;
-        border: none;
-        padding: 10px 24px;
-        border-radius: 8px;
-        font-weight: 500;
-        transition: all 0.3s;
-    }
-    
-    .btn-gradient:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
-        color: white;
-    }
-    
-    .quick-stats {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-        gap: 15px;
-        margin-bottom: 20px;
-    }
-    
-    .stat-item {
-        background: white;
-        padding: 15px;
-        border-radius: 8px;
-        border-left: 4px solid #007bff;
-    }
-    
-    .stat-value {
-        font-size: 1.5rem;
-        font-weight: bold;
-        color: #333;
-    }
-    
-    .stat-label {
-        font-size: 0.8rem;
-        color: #666;
-        text-transform: uppercase;
-    }
-    
-    .detail-table th {
-        background: #f8f9fa;
-        font-weight: 600;
-        border-bottom: 2px solid #dee2e6;
-    }
+    /* Rate Button Style */
+    .btn-rate-add { padding: 0px 6px; font-size: 0.7rem; margin-left: 5px; border-radius: 50%; }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="container-fluid py-4">
     
-    <div class="action-header">
+    <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
-            <h2 class="mb-0"><i class="fas fa-university"></i> Bank Loan Dashboard</h2>
-            <p class="text-muted mb-0">Monitor Sanctioned Limits & Drawing Power</p>
+            <h2 class="mb-0 fw-bold"><i class="fas fa-landmark text-primary"></i> Loan Dashboard</h2>
+            <p class="text-muted mb-0">Sanctioned Limits, Drawing Power & Utilization</p>
         </div>
-        <div class="tool-group">
-            <button type="button" class="btn btn-outline-primary" onclick="syncAllLoans()">
-                <i class="fas fa-sync-alt"></i> Sync Valuations
+        <div class="btn-group">
+            <button type="button" class="btn btn-success shadow-sm" data-bs-toggle="modal" data-bs-target="#addLoanModal">
+                <i class="fas fa-plus-circle"></i> New Loan Facility
             </button>
             
-            <button type="button" class="btn btn-outline-success" onclick="openAddLoanModal()">
-                <i class="fas fa-plus-circle"></i> New Loan
+            <button type="button" class="btn btn-warning text-white shadow-sm ms-2" data-bs-toggle="modal" data-bs-target="#addRateModal">
+                <i class="fas fa-percentage"></i> Update Rates
             </button>
-            
-            <a href="{% url 'accounting_desk:pledge_entry_sheet' %}" class="btn btn-gradient">
-                <i class="fas fa-file-signature"></i> Pledge Entry Sheet
+
+            <a href="{% url 'accounting_desk:pledge_entry_sheet' %}" class="btn btn-outline-primary shadow-sm ms-2">
+                <i class="fas fa-file-invoice-dollar"></i> Pledge Entry Sheet
             </a>
         </div>
     </div>
 
-    <div class="quick-stats">
-        <div class="stat-item">
-            <div class="stat-label">Total Sanctioned</div>
-            <div class="stat-value">Rs. {{ grand_totals.total_sanctioned|floatformat:0|intcomma }}</div>
+    <div class="row g-3 mb-4">
+        <div class="col-md-3">
+            <div class="card border-0 bg-primary text-white h-100 shadow-sm position-relative overflow-hidden">
+                <div class="card-body">
+                    <div class="stat-label text-white-50">Total Sanctioned Limit</div>
+                    <div class="stat-value text-white">Rs. {{ grand_totals.total_sanctioned|floatformat:0|intcomma }}</div>
+                    <i class="fas fa-university summary-card-icon text-white"></i>
+                </div>
+            </div>
         </div>
-        <div class="stat-item" style="border-left-color: #28a745;">
-            <div class="stat-label">Total Drawing Power</div>
-            <div class="stat-value text-success">Rs. {{ grand_totals.total_drawing_power|floatformat:0|intcomma }}</div>
+        <div class="col-md-3">
+            <div class="card border-0 bg-white h-100 shadow-sm border-start border-4 border-success position-relative">
+                <div class="card-body">
+                    <div class="stat-label">Total Drawing Power</div>
+                    <div class="stat-value text-success">Rs. {{ grand_totals.total_drawing_power|floatformat:0|intcomma }}</div>
+                    <i class="fas fa-chart-line summary-card-icon text-success"></i>
+                </div>
+            </div>
         </div>
-        <div class="stat-item" style="border-left-color: #dc3545;">
-            <div class="stat-label">Total Utilized</div>
-            <div class="stat-value text-danger">Rs. {{ grand_totals.total_used|floatformat:0|intcomma }}</div>
+        <div class="col-md-3">
+            <div class="card border-0 bg-white h-100 shadow-sm border-start border-4 border-danger position-relative">
+                <div class="card-body">
+                    <div class="stat-label">Total Utilized</div>
+                    <div class="stat-value text-danger">Rs. {{ grand_totals.total_used|floatformat:0|intcomma }}</div>
+                    <i class="fas fa-hand-holding-usd summary-card-icon text-danger"></i>
+                </div>
+            </div>
         </div>
-        <div class="stat-item" style="border-left-color: #17a2b8;">
-            <div class="stat-label">Available Headroom</div>
-            <div class="stat-value text-info">Rs. {{ grand_totals.total_headroom|floatformat:0|intcomma }}</div>
-        </div>
-        <div class="stat-item" style="border-left-color: #ffc107;">
-            <div class="stat-label">Collateral Value</div>
-            <div class="stat-value text-warning">Rs. {{ grand_totals.total_collateral_value|floatformat:0|intcomma }}</div>
+        <div class="col-md-3">
+            <div class="card border-0 bg-white h-100 shadow-sm border-start border-4 border-info position-relative">
+                <div class="card-body">
+                    <div class="stat-label">Available Headroom</div>
+                    <div class="stat-value text-info">Rs. {{ grand_totals.headroom|floatformat:0|intcomma }}</div>
+                    <i class="fas fa-wallet summary-card-icon text-info"></i>
+                </div>
+            </div>
         </div>
     </div>
 
-    <div class="summary-card mb-4">
-        <h5 class="mb-3"><i class="fas fa-list"></i> Loan Facilities Overview</h5>
-        
-        {% for loan in loans %}
-        <div class="bank-summary-row" onclick="showLoanDetails({{ loan.id }})">
-            <div class="row align-items-center">
-                <div class="col-md-3">
-                    <h6 class="mb-1"><i class="fas fa-building"></i> {{ loan.bank_name }}</h6>
-                    <small class="text-muted">A/C: {{ loan.account_number }}</small>
-                </div>
-                <div class="col-md-2 text-center">
-                    <div class="stat-label">Sanctioned</div>
-                    <div class="stat-value" style="font-size: 1.1rem;">Rs. {{ loan.sanctioned_limit|floatformat:0|intcomma }}</div>
-                </div>
-                <div class="col-md-2 text-center">
-                    <div class="stat-label">Drawing Power</div>
-                    <div class="stat-value text-success" style="font-size: 1.1rem;">Rs. {{ loan.calculated_dp|floatformat:0|intcomma }}</div>
-                </div>
-                <div class="col-md-2 text-center">
-                    <div class="stat-label">Utilized</div>
-                    <div class="stat-value" style="font-size: 1.1rem;">Rs. {{ loan.current_used_amount|floatformat:0|intcomma }}</div>
-                </div>
-                <div class="col-md-2 text-center">
-                    <span class="status-badge {% if loan.utilization_percent > 90 %}bg-danger{% elif loan.utilization_percent > 75 %}bg-warning{% else %}bg-success{% endif %}">
-                        {{ loan.utilization_percent|floatformat:1 }}%
-                    </span>
-                    <div class="utilization-bar">
-                        <div class="utilization-fill {% if loan.utilization_percent > 90 %}bg-danger{% elif loan.utilization_percent > 75 %}bg-warning{% else %}bg-success{% endif %}" 
-                             style="width: {{ loan.utilization_percent }}%"></div>
+    <h5 class="mb-3 text-secondary border-bottom pb-2">Active Loan Facilities</h5>
+    
+    <div class="row g-4">
+        {% for item in loan_data %}
+        <div class="col-md-6 col-xl-4">
+            <div class="card card-loan h-100">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start mb-3">
+                        <div>
+                            <h5 class="card-title mb-1 fw-bold text-dark">{{ item.obj.bank_name }}</h5>
+                            <small class="text-muted font-monospace"><i class="fas fa-hashtag"></i> {{ item.obj.account_number }}</small>
+                        </div>
+                        
+                        <div class="d-flex align-items-center">
+                            <span class="badge bg-light text-dark border" title="Current Effective Rate">
+                                <i class="fas fa-percent text-muted small"></i> {{ item.obj.current_interest_rate }}%
+                            </span>
+                            <button type="button" class="btn btn-sm btn-outline-secondary btn-rate-add" 
+                                    onclick="openRateModal('{{ item.obj.id }}')" title="Change Interest Rate">
+                                <i class="fas fa-plus"></i>
+                            </button>
+                        </div>
                     </div>
-                </div>
-                <div class="col-md-1 text-end">
-                    <i class="fas fa-chevron-right"></i>
+
+                    <div class="row g-2 mb-3 bg-light p-2 rounded mx-0">
+                        <div class="col-6 border-end">
+                            <div class="stat-label">Limit</div>
+                            <div class="fw-bold text-dark">{{ item.obj.sanctioned_limit|floatformat:0|intcomma }}</div>
+                        </div>
+                        <div class="col-6 text-end">
+                            <div class="stat-label">Headroom</div>
+                            <div class="fw-bold text-success">{{ item.headroom|floatformat:0|intcomma }}</div>
+                        </div>
+                    </div>
+
+                    <div class="d-flex justify-content-between text-muted small mb-1">
+                        <span>Used: <span class="fw-bold text-danger">{{ item.utilized|floatformat:0|intcomma }}</span></span>
+                        <span class="fw-bold">{{ item.util_percent|floatformat:1 }}%</span>
+                    </div>
+                    
+                    <div class="progress progress-thin mb-3">
+                        <div class="progress-bar {% if item.util_percent > 90 %}bg-danger{% elif item.util_percent > 75 %}bg-warning{% else %}bg-success{% endif %}" 
+                             role="progressbar" 
+                             style="width: {{ item.util_percent }}%"
+                             aria-valuenow="{{ item.util_percent }}" aria-valuemin="0" aria-valuemax="100">
+                        </div>
+                    </div>
+
+                    <div class="d-grid gap-2">
+                        <a href="{% url 'accounting_desk:pledge_entry_sheet' %}?loan_facility={{ item.obj.id }}" class="btn btn-outline-primary btn-sm">
+                            <i class="fas fa-list-ul"></i> View Ledger Details
+                        </a>
+                    </div>
                 </div>
             </div>
         </div>
         {% empty %}
-        <div class="alert alert-info text-center">
-            <i class="fas fa-info-circle fa-2x mb-2"></i>
-            <p>No loan facilities found. Click "New Loan" to add one.</p>
+        <div class="col-12">
+            <div class="alert alert-warning text-center p-5 border-0 shadow-sm">
+                <i class="fas fa-exclamation-circle fa-3x mb-3 text-warning"></i>
+                <h4>No Loan Facilities Found</h4>
+                <p class="text-muted">You haven't added any bank loans yet.</p>
+                <button type="button" class="btn btn-warning mt-2 fw-bold text-white" data-bs-toggle="modal" data-bs-target="#addLoanModal">
+                    <i class="fas fa-plus-circle"></i> Add Your First Bank Loan
+                </button>
+            </div>
         </div>
         {% endfor %}
     </div>
 
-</div>
-
-<div class="modal fade" id="loanDetailsModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-xl">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title"><i class="fas fa-info-circle"></i> Pledged Securities (Inventory)</h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <div class="modal-body" id="loanDetailsContent">
-                
-                <div class="alert alert-light border">
-                    <i class="fas fa-info-circle"></i> To Add/Release Pledges or update Loan Usage, please use the 
-                    <a href="{% url 'accounting_desk:pledge_entry_sheet' %}" class="fw-bold">Pledge Entry Sheet</a>.
-                </div>
-
-                <div class="mb-3">
-                    <select id="bankFilter" class="form-select w-auto" onchange="filterLoanDetails()">
-                        <option value="all">All Banks</option>
-                        {% for loan in loans %}
-                        <option value="{{ loan.id }}">{{ loan.bank_name }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-
-                <div class="table-responsive">
-                    <table class="table detail-table table-hover">
-                        <thead>
-                            <tr>
-                                <th>Bank</th>
-                                <th>Symbol</th>
-                                <th class="text-end">Quantity</th>
-                                <th class="text-end">LTP</th>
-                                <th class="text-end">Value</th>
-                                <th class="text-end">Avg Price</th>
-                                <th class="text-end">DP Limit</th>
-                                <th class="text-end">Utilized (Snapshot)</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for loan in loans %}
-                                {% for scrip in loan.pledged_scrips.all %}
-                                <tr class="pledge-item" data-loan-id="{{ loan.id }}">
-                                    <td>{{ loan.bank_name }}</td>
-                                    <td><strong>{{ scrip.symbol }}</strong></td>
-                                    <td class="text-end">{{ scrip.quantity }}</td>
-                                    <td class="text-end">Rs. {{ scrip.ltp|floatformat:2 }}</td>
-                                    <td class="text-end">Rs. {{ scrip.current_value|floatformat:0|intcomma }}</td>
-                                    <td class="text-end">{{ scrip.average_price|floatformat:2 }}</td>
-                                    <td class="text-end text-success"><strong>Rs. {{ scrip.current_dp|floatformat:0|intcomma }}</strong></td>
-                                    <td class="text-end text-muted">Rs. {{ scrip.utilized_amount|floatformat:0|intcomma }}</td>
-                                </tr>
-                                {% endfor %}
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-    </div>
 </div>
 
 <div class="modal fade" id="addLoanModal" tabindex="-1" aria-hidden="true">
@@ -295,31 +162,94 @@
             <form method="post">
                 {% csrf_token %}
                 <div class="modal-body">
-                    {% if loan_form.non_field_errors %}
-                    <div class="alert alert-danger">
-                        {{ loan_form.non_field_errors }}
-                    </div>
+                    {% if loan_form.errors %}
+                        <div class="alert alert-danger">
+                            <ul class="mb-0 ps-3">
+                                {% for field in loan_form %}
+                                    {% for error in field.errors %}<li><strong>{{ field.label }}:</strong> {{ error }}</li>{% endfor %}
+                                {% endfor %}
+                            </ul>
+                        </div>
                     {% endif %}
 
-                    {% for field in loan_form %}
                     <div class="mb-3">
-                        <label class="form-label fw-bold">{{ field.label }}</label>
-                        {{ field }}
-                        {% if field.help_text %}
-                            <small class="form-text text-muted">{{ field.help_text }}</small>
-                        {% endif %}
-                        {% if field.errors %}
-                            <div class="text-danger small mt-1">
-                                {{ field.errors|striptags }}
-                            </div>
-                        {% endif %}
+                        <label class="form-label fw-bold">Bank Name</label>
+                        {{ loan_form.bank_name }}
                     </div>
-                    {% endfor %}
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Account Number</label>
+                        {{ loan_form.account_number }}
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Sanctioned Limit (Rs.)</label>
+                        {{ loan_form.sanctioned_limit }}
+                    </div>
+                    <div class="row">
+                        <div class="col-6 mb-3">
+                            <label class="form-label fw-bold">Start Date</label>
+                            {{ loan_form.start_date }}
+                        </div>
+                        <div class="col-6 mb-3">
+                            <label class="form-label fw-bold">Expiry Date</label>
+                            {{ loan_form.expiry_date }}
+                        </div>
+                    </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" name="add_loan" class="btn btn-success">
-                        <i class="fas fa-save"></i> Save Facility
+                    <button type="submit" name="add_loan" class="btn btn-success"><i class="fas fa-save"></i> Save Facility</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="addRateModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-warning text-white">
+                <h5 class="modal-title"><i class="fas fa-percentage"></i> Update Interest Rate</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form method="post">
+                {% csrf_token %}
+                <div class="modal-body">
+                    {% if rate_form.errors %}
+                        <div class="alert alert-danger">
+                            Error saving rate. Please check inputs.
+                        </div>
+                    {% endif %}
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Select Bank</label>
+                        {{ rate_form.loan_facility }}
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-6 mb-3">
+                            <label class="form-label fw-bold">Base Rate (%)</label>
+                            {{ rate_form.base_rate }}
+                        </div>
+                        <div class="col-6 mb-3">
+                            <label class="form-label fw-bold">Premium (%)</label>
+                            {{ rate_form.premium }}
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Effective Date</label>
+                        {{ rate_form.effective_date }}
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Remarks</label>
+                        {{ rate_form.remarks }}
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" name="add_rate" class="btn btn-warning text-white fw-bold">
+                        <i class="fas fa-check-circle"></i> Update Rate
                     </button>
                 </div>
             </form>
@@ -331,70 +261,24 @@
 
 {% block scripts %}
 <script>
-    // --- 1. MODAL CONTROLLERS ---
-
-    // Manually Open Add Loan Modal (More reliable than data-bs-target)
-    function openAddLoanModal() {
-        var myModal = new bootstrap.Modal(document.getElementById('addLoanModal'));
-        myModal.show();
-    }
-
-    // Open Loan Details (Inventory) Modal
-    function showLoanDetails(loanId) {
-        document.getElementById('bankFilter').value = loanId;
-        filterLoanDetails();
-        var myModal = new bootstrap.Modal(document.getElementById('loanDetailsModal'));
-        myModal.show();
-    }
-
-    // --- 2. FILTER LOGIC ---
-    function filterLoanDetails() {
-        const bankId = document.getElementById('bankFilter').value;
-        const rows = document.querySelectorAll('.pledge-item');
-        rows.forEach(row => {
-            const rowBankId = row.getAttribute('data-loan-id');
-            row.style.display = (bankId === 'all' || rowBankId === bankId) ? '' : 'none';
-        });
-    }
-
-    // --- 3. SYNC API ---
-    function syncAllLoans() {
-        const btn = event.target.closest('button');
-        const originalHTML = btn.innerHTML;
-        
-        btn.disabled = true;
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Syncing...';
-        
-        fetch('{% url "accounting_desk:sync_loan_valuations" %}', {
-            method: 'POST',
-            headers: {
-                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
-            }
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                alert(`✓ Sync Complete!\nUpdated ${data.updated} scrips.`);
-                location.reload();
-            } else {
-                alert('Sync failed: ' + (data.error || 'Unknown error'));
-            }
-        })
-        .catch(error => {
-            alert('Error syncing: ' + error);
-        })
-        .finally(() => {
-            btn.disabled = false;
-            btn.innerHTML = originalHTML;
-        });
-    }
-
-    // --- 4. ERROR HANDLING (Auto-Open Modal on Error) ---
+    // Auto-open modal if errors exist
     document.addEventListener("DOMContentLoaded", function() {
-        // If Django backend returned form errors (POST failed), re-open the modal immediately
         {% if loan_form.errors %}
-            openAddLoanModal();
+            new bootstrap.Modal(document.getElementById('addLoanModal')).show();
+        {% endif %}
+        {% if rate_form.errors %}
+            new bootstrap.Modal(document.getElementById('addRateModal')).show();
         {% endif %}
     });
+
+    // Helper to open Rate Modal and pre-select bank
+    function openRateModal(loanId) {
+        var myModal = new bootstrap.Modal(document.getElementById('addRateModal'));
+        var select = document.getElementById('id_rate_loan'); // Prefix 'rate' set in view
+        if(select) {
+            select.value = loanId;
+        }
+        myModal.show();
+    }
 </script>
 {% endblock %}
