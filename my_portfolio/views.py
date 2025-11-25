@@ -2560,73 +2560,114 @@ def my_share_details(request):
                 except Exception as e:
                     messages.error(request, f"Error: {e}")
 
-        # --- UPLOAD EDIS (With Date) ---
+        # --- UPLOAD EDIS (Updated with INITIATED status) ---
         elif 'upload_transfer_csv' in request.POST:
             transfer_form = TransferRequestUploadForm(request.POST, request.FILES)
+            
             if transfer_form.is_valid():
                 demat_account = transfer_form.cleaned_data['demat_account']
-                target_date = transfer_form.cleaned_data['settlement_date'] # <--- GET DATE
+                target_date = transfer_form.cleaned_data['settlement_date']
                 file = request.FILES['file']
                 
                 try:
-                    decoded_file = file.read().decode('utf-8').splitlines()
+                    # 1. Read File (Handle Excel BOM with utf-8-sig)
+                    decoded_file = file.read().decode('utf-8-sig').splitlines()
                     reader = csv.DictReader(decoded_file)
-                    TARGET_STATUSES = {'PENDING', 'ACKNOWLEDGED'}
+                    
+                    # Clean headers (e.g., " Scrip " -> "Scrip")
+                    if reader.fieldnames:
+                        reader.fieldnames = [name.strip() for name in reader.fieldnames]
+                    
+                    # --- FIX: ADDED 'INITIATED' HERE ---
+                    TARGET_STATUSES = {'PENDING', 'ACKNOWLEDGED', 'INITIATED'}
                     
                     processed_count = 0
+                    skipped_status_count = 0
+                    skipped_not_found_count = 0
                     modified_ids = []
+
                     for row in reader:
+                        # 2. Check Status
                         status = row.get('Status', '').strip().upper()
-                        if status not in TARGET_STATUSES: continue
                         
+                        # Now checks for PENDING, ACKNOWLEDGED, OR INITIATED
+                        if status not in TARGET_STATUSES: 
+                            skipped_status_count += 1
+                            continue
+                        
+                        # 3. Get Scrip and Quantity
                         scrip = row.get('Scrip', '').strip().upper()
+                        
                         try:
-                            qty_to_transfer = Decimal(row.get('Quantity', '0').replace(',', ''))
-                        except: continue
+                            # Handle "1,000" and spaces
+                            qty_str = row.get('Quantity', '0').replace(',', '').strip()
+                            qty_to_transfer = Decimal(qty_str)
+                        except: 
+                            continue
+                            
                         if qty_to_transfer <= 0: continue
 
+                        # 4. Find Holding (Strict Date Match)
                         try:
-                            # ONLY find holdings for the SPECIFIC DATE
                             holding = MeroShareHolding.objects.get(
                                 demat_account=demat_account, 
                                 symbol__script_ticker=scrip,
-                                snapshot_date=target_date # <--- FILTER BY DATE
+                                snapshot_date=target_date 
                             )
                         except MeroShareHolding.DoesNotExist:
+                            skipped_not_found_count += 1
                             continue
 
-                        # ... (Calculations same as before) ...
-                        current_free = holding.free_balance
-                        current_pledge = holding.pledge_balance
-                        current_total = holding.current_balance
+                        # 5. Reduction Logic
+                        current_free = holding.free_balance if holding.free_balance is not None else Decimal(0)
+                        current_pledge = holding.pledge_balance if holding.pledge_balance is not None else Decimal(0)
+                        current_total = holding.current_balance if holding.current_balance is not None else Decimal(0)
                         
                         if qty_to_transfer >= current_total:
+                            # Zero out everything
                             holding.current_balance = Decimal(0)
                             holding.free_balance = Decimal(0)
                             holding.pledge_balance = Decimal(0)
-                            # ... zero others ...
                         else:
-                            holding.current_balance -= qty_to_transfer
+                            # Reduce Total
+                            holding.current_balance = current_total - qty_to_transfer
+                            
+                            # Reduce Free first
                             if qty_to_transfer <= current_free:
-                                holding.free_balance -= qty_to_transfer
+                                holding.free_balance = current_free - qty_to_transfer
+                                holding.pledge_balance = current_pledge 
                             else:
+                                # Eat into pledge if free is not enough
                                 remainder = qty_to_transfer - current_free
                                 holding.free_balance = Decimal(0)
                                 if remainder > current_pledge:
                                     holding.pledge_balance = Decimal(0)
                                 else:
-                                    holding.pledge_balance -= remainder
+                                    holding.pledge_balance = current_pledge - remainder
                         
                         holding.save()
                         modified_ids.append(holding.id)
                         processed_count += 1
+                        
                     request.session['highlight_ids'] = modified_ids
 
-                    messages.success(request, f"Applied {processed_count} transfers to records of {target_date}.")
+                    # 6. Feedback
+                    if processed_count > 0:
+                        messages.success(request, f"Successfully reduced {processed_count} holdings for {target_date}.")
+                    else:
+                        msg = f"No records updated for {target_date}."
+                        if skipped_not_found_count > 0:
+                            msg += f" (Skipped {skipped_not_found_count} items - holding not found)."
+                        elif skipped_status_count > 0:
+                            msg += f" (Skipped {skipped_status_count} items with status other than Pending/Initiated)."
+                        messages.warning(request, msg)
+                    
                     return redirect(f"{reverse('my_portfolio:my_share_details')}?filter_date={target_date}")
 
                 except Exception as e:
-                    messages.error(request, f"Error: {e}")
+                    messages.error(request, f"Error processing file: {e}")
+            else:
+                 messages.error(request, "Invalid form submission.")
 
         # --- D. Delete Holdings ---
         elif 'delete_holdings' in request.POST:
