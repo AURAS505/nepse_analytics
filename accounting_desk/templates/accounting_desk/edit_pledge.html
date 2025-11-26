@@ -5,40 +5,64 @@
 {% block content %}
 <div class="container py-5">
     <div class="row justify-content-center">
-        <div class="col-md-6">
+        <div class="col-md-8">
             <div class="card shadow">
                 <div class="card-header bg-warning">
                     <h5 class="mb-0 text-dark"><i class="fas fa-edit"></i> Edit Pledge Entry</h5>
                 </div>
                 <div class="card-body">
-                    <div class="alert alert-info">
-                        <small>Editing this entry will automatically revert the previous impact on Inventory/MeroShare and apply the new values.</small>
+                    <div class="alert alert-info small">
+                        <i class="fas fa-info-circle"></i> Updating this entry will automatically recalculate the Drawing Power and Running Balances for all subsequent entries for this Bank/Script.
                     </div>
+                    
                     <form method="post">
                         {% csrf_token %}
-                        <div class="mb-2">{{ form.date.label_tag }} {{ form.date }}</div>
-                        <div class="mb-2">{{ form.loan_facility.label_tag }} {{ form.loan_facility }}</div>
-                        <div class="mb-2">{{ form.demat_account.label_tag }} {{ form.demat_account }}</div>
-                        <div class="row">
-                            <div class="col-6 mb-2">{{ form.symbol.label_tag }} {{ form.symbol }}</div>
-                            <div class="col-6 mb-2">{{ form.action.label_tag }} {{ form.action }}</div>
+                        <div class="d-none">{{ form.unique_id }}</div>
+
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold">Date</label>
+                                {{ form.date }}
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold">Action</label>
+                                {{ form.action }}
+                            </div>
+                            
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold">Bank / Facility</label>
+                                {{ form.loan_facility }}
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold">Script</label>
+                                {{ form.symbol }}
+                            </div>
+
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold text-primary">Kitta (Qty)</label>
+                                {{ form.kitta }}
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold text-success">Utilized Amt (+/-)</label>
+                                {{ form.tx_utilized }}
+                            </div>
+                            
+                            <hr class="text-muted my-2">
+                            
+                            <div class="col-md-4">
+                                <label class="form-label fw-bold small text-muted">180 Day Avg</label>
+                                {{ form.tx_180_avg }} </div>
+                            <div class="col-md-4">
+                                <label class="form-label fw-bold small text-muted">Closing Price</label>
+                                {{ form.tx_closing_price }} </div>
+                            <div class="col-md-4">
+                                <label class="form-label fw-bold small text-muted">Margin %</label>
+                                {{ form.tx_margin }} </div>
                         </div>
-                        <div class="row">
-                            <div class="col-6 mb-2">{{ form.kitta.label_tag }} {{ form.kitta }}</div>
-                            <div class="col-6 mb-2">{{ form.margin.label_tag }} {{ form.margin }}</div>
-                        </div>
-                        <div class="row">
-                            <div class="col-6 mb-2">{{ form.average_closing_price.label_tag }} {{ form.average_closing_price }}</div>
-                            <div class="col-6 mb-2">{{ form.closing_price.label_tag }} {{ form.closing_price }}</div>
-                        </div>
-                        <div class="mb-3">
-                            <label class="fw-bold">Utilized Loan (Rs.)</label>
-                            {{ form.utilized_loan }}
-                        </div>
-                        
-                        <div class="d-flex justify-content-between">
+
+                        <div class="mt-4 d-flex justify-content-between">
                             <a href="{% url 'accounting_desk:pledge_entry_sheet' %}" class="btn btn-secondary">Cancel</a>
-                            <button type="submit" class="btn btn-primary">Update Entry</button>
+                            <button type="submit" class="btn btn-primary fw-bold">Update & Recalculate</button>
                         </div>
                     </form>
                 </div>

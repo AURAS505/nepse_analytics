@@ -8,6 +8,23 @@ nepse_analytics/
     requirements.txt
     signouthango.txt
     structure.txt
+    accounting_desk/
+        admin.py
+        apps.py
+        forms.py
+        models.py
+        tests.py
+        urls.py
+        views.py
+        __init__.py
+        templates/
+            accounting_desk/
+                accounting_dashboard.html
+                bank_loan_report.html
+                edit_margin.html
+                edit_pledge.html
+                margin_management.html
+                pledge_entry_sheet.html
     adjustments_stock_price/
         admin.py
         apps.py
@@ -62,6 +79,7 @@ nepse_analytics/
     my_portfolio/
         admin.py
         apps.py
+        forms.py
         models.py
         tests.py
         urls.py
@@ -75,7 +93,11 @@ nepse_analytics/
                 company_dashboard.html
                 dashboard.html
                 edit_broker_transaction.html
+                edit_demat_account.html
                 edit_transaction.html
+                manage_demat_accounts.html
+                my_share_details.html
+                portfolio_watch.html
                 sp_report.html
                 transactions.html
                 valuation_report.html
@@ -113,10 +135,12 @@ nepse_analytics/
                 floorsheet.html
                 indices.html
                 market_cap.html
+                n_days_average.html
                 todays_price.html
         templatetags/
             query_params.py
             __init__.py
+    static/
     statistical_analysis/
         admin.py
         apps.py

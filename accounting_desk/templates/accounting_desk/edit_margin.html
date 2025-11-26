@@ -1,23 +1,39 @@
 {% extends 'base.html' %}
 
-{% block title %}Edit Margin{% endblock %}
+{% block title %}Edit Margin Rule{% endblock %}
 
 {% block content %}
 <div class="container py-5">
     <div class="row justify-content-center">
-        <div class="col-md-5">
-            <div class="card shadow">
-                <div class="card-header bg-primary text-white">
-                    <h5 class="mb-0"><i class="fas fa-edit"></i> Edit Margin Details</h5>
+        <div class="col-md-6">
+            <div class="card shadow border-warning">
+                <div class="card-header bg-warning text-dark">
+                    <h5 class="mb-0"><i class="fas fa-edit"></i> Edit Margin Rule</h5>
                 </div>
                 <div class="card-body">
                     <form method="post">
                         {% csrf_token %}
-                        {{ form.as_p }}
                         
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Bank Facility</label>
+                            {{ form.loan_facility }}
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Script</label>
+                            {{ form.symbol }}
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Margin %</label>
+                            {{ form.margin_percent }}
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Remarks</label>
+                            {{ form.remarks }}
+                        </div>
+
                         <div class="d-flex justify-content-between mt-4">
                             <a href="{% url 'accounting_desk:manage_margins' %}" class="btn btn-secondary">Cancel</a>
-                            <button type="submit" class="btn btn-primary">Update Margin</button>
+                            <button type="submit" class="btn btn-warning fw-bold">Update Rule</button>
                         </div>
                     </form>
                 </div>
